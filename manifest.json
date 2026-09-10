@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "nick.chime",
+  "name": "Omarchy Chime",
+  "version": "0.1.0",
+  "author": "Omarchy",
+  "description": "Desktop-sounds alpha: window open/close, workspace switches, mute, volume, and previews.",
+  "kinds": [
+    "service"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}

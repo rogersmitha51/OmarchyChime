@@ -1,0 +1,76 @@
+{
+  "provenance": {
+    "project": "Omarchy Chime",
+    "pluginId": "nick.chime",
+    "version": "0.1.0",
+    "status": "alpha",
+    "description": "Independent desktop-sounds alpha. Reads original DND, lock, and idle state; owns no notification service or UI.",
+    "referenceImplementation": "Omarchy shell plugin conventions and gobijan.ui-sounds desktop-event filters; no notification implementation retained."
+  },
+  "runtimeBaseline": {
+    "package": "quickshell-git",
+    "packageVersion": "0.3.0.r20.g28771c7-2",
+    "host": "omarchy-dev 4.0.2.r6879.gaae2586-1",
+    "hostPath": "/usr/share/omarchy/shell/shell.qml",
+    "audio": "pipewire (pw-play)"
+  },
+  "dependencies": {
+    "runtime": [
+      "pipewire-audio (pw-play)",
+      "sound-theme-freedesktop: device-added.oga, device-removed.oga, audio-volume-change.oga (stereo)"
+    ],
+    "hostServices": [
+      "omarchy.notifications (read-only: doNotDisturb)",
+      "omarchy.lock (read-only: locked)",
+      "omarchy.idle (read-only: idledThisCycle, screensaverStartedThisCycle, screensaverWindowCount)"
+    ],
+    "hostInjection": [
+      "shell (serviceFor)",
+      "pluginRegistry (isEnabled)"
+    ],
+    "components": [
+      "ChimeController.qml (audio/settings)",
+      "DesktopEvents.qml (window/workspace adapter)"
+    ]
+  },
+  "integrationFields": {
+    "safetyReady": "conservative presence and valid known fields of DND/lock/idle services + unlocked/nonidle/nonDND + real screen + settled startup",
+    "overlapBlocked": "pluginRegistry.isEnabled('gobijan.ui-sounds') === true; unknown registry or unknown state => blocked",
+    "desktopReady": "adapter.ready passed through as DesktopEvents.ready",
+    "ipcTarget": "chime",
+    "ipcCommands": [
+      "status",
+      "mute",
+      "unmute",
+      "volume <0-1>",
+      "desktop on|off",
+      "preview <eventName>",
+      "help"
+    ]
+  },
+  "license": {
+    "spdxId": "MIT",
+    "copyright": "Copyright (c) David Heinemeier Hansson",
+    "file": "LICENSE",
+    "sha256": "717ba1949502290f8e47688ae2e323acd06c8ca47aec9f7596b15f678c1af4a2"
+  },
+  "verification": {
+    "date": "2026-09-09",
+    "status": "Alpha implemented and exercised in the installed Omarchy shell.",
+    "sourceGates": [
+      "omarchy plugin validate .",
+      "qmllint -I /usr/lib/qt6/qml -W 0: all product QML/JS and service-safety.qml passed",
+      "node --test tests/controller.test.mjs tests/desktop.test.mjs: 22 tests passed"
+    ],
+    "runtime": [
+      "Real window open/close and workspace round trip started their mapped pw-play assets; repeated workspace request produced no player.",
+      "Same-tick preview burst accepted one request and rejected two as busy.",
+      "Live mute and DND suppressed playback; DND and repeated mute cancelled a running preview.",
+      "Isolated real-QML harness passed lock/idle, missing services, service-map replacement, and overlap gating.",
+      "Invalid settings reload preserved mute and volume; settings survived plugin unload/re-enable and actual file hot reload.",
+      "Owned audio process disappeared after unload/hot reload; no startup playback.",
+      "Original notification bus owner and IPC remained unchanged; DND restored; unrelated shell configuration preserved."
+    ],
+    "limitations": "Physical audibility was not independently confirmed. Lock/idle transitions were simulated in the real-QML harness rather than locking the user's desktop. Notification/agent sounds and a bar widget are not part of this alpha."
+  }
+}
