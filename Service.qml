@@ -1,12 +1,14 @@
-// Omarchy Chime — desktop event sounds and agent-input cues.
+// Omarchy Chime — desktop event sounds, system volume/power cues, and
+// agent-input cues.
 //
 // Independent service plugin (nick.chime). This file is a small composition
 // root only: it wires the ChimeController (audio/settings), DesktopEvents
-// (window/workspace adapter), and NotificationEvents (passive agent-input
-// observer) slices together, resolves the original DND/lock/idle services
-// for conservative safety gating, and exposes the `chime` IPC surface. It
-// owns no notification daemon, popup, history, or DND state — the built-in
-// omarchy.notifications service keeps all of that.
+// (window/workspace adapter), SystemEvents (volume/power adapter), and
+// NotificationEvents (passive agent-input observer) slices together,
+// resolves the original DND/lock/idle services for conservative safety
+// gating, and exposes the `chime` IPC surface. It owns no notification
+// daemon, popup, history, or DND state — the built-in omarchy.notifications
+// service keeps all of that.
 
 import QtQuick
 import Quickshell
@@ -28,6 +30,7 @@ Item {
         // Safety gating is supplied by this composition root (see below).
         safetyReady: service.safetyReady
         desktopReady: adapter.ready
+        systemReady: systemAdapter.ready
         overlapBlocked: service.overlapBlocked
         agentInputReady: observer.ready
     }
@@ -36,6 +39,17 @@ Item {
         id: adapter
         // The adapter monitors whenever the session is safe. Overlap and mute
         // are the controller's playback decision, not the adapter's.
+        active: service.safetyReady
+        onEventOccurred: function (eventName) {
+            controller.playEvent(eventName);
+        }
+    }
+
+    SystemEvents {
+        id: systemAdapter
+        // The system adapter monitors the same safety boundary as the desktop
+        // adapter: volume/power events only sound while the session is safe.
+        // Overlap and mute are the controller's playback decision.
         active: service.safetyReady
         onEventOccurred: function (eventName) {
             controller.playEvent(eventName);
@@ -269,7 +283,7 @@ Item {
     function statusJson() {
         return JSON.stringify({
             plugin: "nick.chime",
-            version: "0.2.0",
+            version: "0.3.0",
             safety: {
                 ready: service.safetyReady,
                 reason: service.safetyReason,
@@ -291,6 +305,7 @@ Item {
             },
             controller: controller.status(),
             adapter: adapter.status(),
+            system: systemAdapter.status(),
             notification: observer.status()
         });
     }

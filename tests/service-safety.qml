@@ -27,11 +27,11 @@
 //   }
 //
 // `import ".." as Chime` resolves to the config root, so the real product
-// Service/ChimeController/DesktopEvents are exercised — never mocks of the
-// product. The harness injects fake host objects (shell._services/serviceFor
-// and pluginRegistry.isEnabled/registryRevision) exactly like omarchy-shell's
-// service loader, then drives observable service-state transitions through
-// the real statusJson() output.
+// Service/ChimeController/DesktopEvents/SystemEvents are exercised — never
+// mocks of the product. The harness injects fake host objects
+// (shell._services/serviceFor and pluginRegistry.isEnabled/registryRevision)
+// exactly like omarchy-shell's service loader, then drives observable
+// service-state transitions through the real statusJson() output.
 //
 // Success: prints CHIME_SERVICE_SAFETY_PASS and exits 0.
 // Failure: prints CHIME_SERVICE_SAFETY_FAIL <step>: <detail> and exits nonzero.
@@ -226,7 +226,7 @@ ShellRoot {
     }
 
     function runStep() {
-        var labels = ["inject host fakes", "initial ready state", "dnd on", "dnd off", "lock on", "unlock", "idle on", "idle off", "screensaver started on", "screensaver window count on", "screensaver window count off", "invalid dnd type", "valid dnd restored", "missing services", "null shell", "services restored", "wholesale replacement", "old instance mutations", "registry unknown", "registry strict false", "registry true", "registry missing + continue", "agent input off by default", "agent input on starts observer", "agent input off stops observer", "agent input gated by safety", "agent input safety cleared"];
+        var labels = ["inject host fakes", "initial ready state", "dnd on", "dnd off", "lock on", "unlock", "idle on", "idle off", "screensaver started on", "screensaver window count on", "screensaver window count off", "invalid dnd type", "valid dnd restored", "missing services", "null shell", "services restored", "wholesale replacement", "old instance mutations", "registry unknown", "registry strict false", "registry true", "registry missing + continue", "agent input off by default", "agent input on starts observer", "agent input off stops observer", "agent input gated by safety", "agent input safety cleared", "system ready while safe", "system deactivated by dnd", "system reactivated after dnd cleared", "pass"];
         console.log("CHIME_SERVICE_SAFETY_STEP " + harness.step + " " + labels[harness.step]);
         switch (harness.step) {
         case 0:
@@ -310,6 +310,18 @@ ShellRoot {
         case 26:
             harness.step25();
             break;
+        case 27:
+            harness.step26();
+            break;
+        case 28:
+            harness.step27();
+            break;
+        case 29:
+            harness.step28();
+            break;
+        case 30:
+            harness.step29();
+            break;
         default:
             harness.fail("machine", "unexpected step " + harness.step);
         }
@@ -326,6 +338,8 @@ ShellRoot {
 
     function step1() {
         var s = harness.status();
+        harness.check(s.plugin === "nick.chime", "plugin identity");
+        harness.check(s.version === "0.3.0", "status version matches manifest");
         harness.check(s.safety.ready === true, "initial ready");
         harness.check(s.safety.dndPresent === true && s.safety.dndValid === true, "dnd present and valid");
         harness.check(s.safety.lockPresent === true && s.safety.lockValid === true, "lock present and valid");
@@ -634,6 +648,69 @@ ShellRoot {
         harness.check(s.notification.active === false, "observer deactivated by dnd");
         harness.check(s.notification.ready === false, "observer readiness cleared on deactivation");
         harness.check(s.controller.agentInputReady === false, "controller agent input not ready while unsafe");
+        harness.step++;
+    }
+
+    // ------------------------------------------------------------ system adapter gate
+
+    // The system adapter lives under the same safety boundary as every other
+    // slice: while the session is safe it is active and (once its own
+    // readiness settles — the singleton environment may not provide live
+    // sources, where readiness stays false) the controller reflects its
+    // state as systemReady. Safety loss deactivates it and clears readiness;
+    // recovery reactivates it. Assertions are limited to the composition
+    // contract: the service wires `active` to the safety gate and binds
+    // systemReady to the adapter's ready — never the adapter internals.
+    function step26() {
+        // Safety is currently held false by step 24's dnd. Restore it and
+        // confirm the system adapter follows the safety boundary.
+        fakeDnd2.doNotDisturb = false;
+        harness.beginWait(function () {
+            var st = harness.status();
+            return st && st.safety.ready === true && st.system.active === true;
+        }, "system active while safe", 5000);
+    }
+
+    function step27() {
+        var s = harness.status();
+        harness.check(s.system.active === true, "system active while safe");
+        harness.check(s.controller.systemReady === s.system.ready, "systemReady mirrors adapter readiness");
+        // Safety loss must deactivate the system adapter exactly like the
+        // desktop adapter: no system events while unsafe.
+        harness.check(s.adapter.active === true, "desktop adapter active before dnd");
+        fakeDnd2.doNotDisturb = true;
+        harness.beginWait(function () {
+            var st = harness.status();
+            return st && st.safety.ready === false && st.system.active === false;
+        }, "dnd deactivates system adapter", 5000);
+    }
+
+    function step28() {
+        // Fail-closed transition: safety loss must deactivate the system
+        // adapter AND clear its readiness and the controller's system gate,
+        // so no system event can sound while unsafe. Asserted as part of the
+        // transition itself so any settle/clear timing cannot race the check.
+        fakeDnd2.doNotDisturb = true;
+        harness.beginWait(function () {
+            var st = harness.status();
+            return st && st.safety.ready === false && st.system.active === false && st.system.ready === false && st.controller.systemReady === false;
+        }, "dnd fail-closed: system deactivated, readiness cleared, controller gate closed", 5000);
+        var s = harness.status();
+        // The desktop adapter closes under the same gate: DND is a shared
+        // safety boundary, not a system-specific one.
+        harness.check(s.adapter.active === false, "desktop adapter deactivated by dnd too");
+        // Recovery reactivates the system adapter.
+        fakeDnd2.doNotDisturb = false;
+        harness.beginWait(function () {
+            var st = harness.status();
+            return st && st.safety.ready === true && st.system.active === true;
+        }, "dnd cleared: system adapter reactivated", 5000);
+    }
+
+    function step29() {
+        var s = harness.status();
+        harness.check(s.system.active === true, "system reactivated");
+        harness.check(s.adapter.active === true, "desktop adapter reactivated");
         harness.pass();
     }
 

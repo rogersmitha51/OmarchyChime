@@ -146,7 +146,7 @@ function gates() {
     desktopEnabled: true,
     overlapBlocked: false,
     safetyReady: true,
-    desktopReady: true,
+    eventReady: true,
     cooldownActive: false,
     playing: false
   }
@@ -183,27 +183,99 @@ test("persisted settings round-trip and drive playback eligibility", () => {
   assert.equal(Logic.agentInputBlockedReason({ ...agentGates(), ...parsedOn.settings }), "")
 })
 
-test("desktop automatic playback requires every desktop gate, first blocking gate wins", () => {
+test("automatic playback requires every caller-configured gate, first blocking gate wins", () => {
   assert.equal(Logic.automaticBlockedReason(gates()), "")
   assert.equal(Logic.automaticBlockedReason({ ...gates(), settingsReady: false }), "settings not ready")
   assert.equal(Logic.automaticBlockedReason({ ...gates(), enabled: false }), "muted")
   assert.equal(Logic.automaticBlockedReason({ ...gates(), desktopEnabled: false }), "desktop sounds disabled")
   assert.equal(Logic.automaticBlockedReason({ ...gates(), overlapBlocked: true }), "blocked by ui-sounds")
   assert.equal(Logic.automaticBlockedReason({ ...gates(), safetyReady: false }), "not safe")
-  assert.equal(Logic.automaticBlockedReason({ ...gates(), desktopReady: false }), "desktop not ready")
-  assert.equal(Logic.automaticBlockedReason({ ...gates(), cooldownActive: true }), "cooldown")
+  assert.equal(Logic.automaticBlockedReason({ ...gates(), eventReady: false }), "event source not ready")
   assert.equal(Logic.automaticBlockedReason({ ...gates(), playing: true }), "busy")
+  // The post-exit cooldown never blocks automatic non-agent events: a rapid
+  // repeated same-name event (a second workspaceSwitched arriving after the
+  // previous child exited but while the cooldown is still active) must stay
+  // eligible on the repeat — the desktop/system source state machines already
+  // deduplicate non-transitions and the controller preempts a running voice.
+  const switched = gates()
+  assert.equal(Logic.automaticBlockedReason(switched), "")
+  assert.equal(Logic.automaticBlockedReason({ ...switched, cooldownActive: true }), "")
   // Mute is reported before a safety loss: gate order is part of the policy.
   assert.equal(Logic.automaticBlockedReason({ ...gates(), enabled: false, safetyReady: false }), "muted")
+  // The caller selects which adapter readiness gates automatic playback:
+  // the gate consumes the caller-set eventReady. A present desktop adapter
+  // does not substitute for an unready caller-selected source.
+  assert.equal(Logic.automaticBlockedReason({ ...gates(), eventReady: true }), "")
+  assert.equal(Logic.automaticBlockedReason({ ...gates(), eventReady: false, desktopReady: true }), "event source not ready")
 })
 
-test("agent-input playback is independent of desktop gates", () => {
+// ------------------------------------------------------- event classification
+
+const ALL_EVENTS = ["windowOpened", "windowClosed", "workspaceSwitched", "agentNeedsInput", "volumeUp", "volumeDown", "powerConnected", "powerDisconnected"]
+const ALL_SYSTEM_EVENTS = ["volumeUp", "volumeDown", "powerConnected", "powerDisconnected"]
+const ASSET_DIR = "/usr/share/sounds/freedesktop/stereo/"
+
+test("isValidEvent accepts every known event and rejects everything else", () => {
+  for (const name of ALL_EVENTS)
+    assert.equal(Logic.isValidEvent(name), true, name)
+  for (const bad of ["", null, undefined, "volumeUpp", "PowerConnected", "unknown", 42])
+    assert.equal(Logic.isValidEvent(bad), false, String(bad) + " must be rejected")
+})
+
+test("the four system events are classified as system events, and the agent event classification is unchanged", () => {
+  for (const name of ALL_EVENTS)
+    assert.equal(Logic.isSystemEvent(name), ALL_SYSTEM_EVENTS.includes(name), name)
+  // The agent-input event is still exactly the agent event, and system
+  // events are never agent events.
+  for (const name of ALL_SYSTEM_EVENTS)
+    assert.equal(Logic.isAgentEvent(name), false, name)
+  assert.equal(Logic.isAgentEvent("agentNeedsInput"), true)
+  for (const bad of ["", null, undefined, "volumeUp", "PowerConnected"])
+    assert.equal(Logic.isAgentEvent(bad), false, String(bad))
+})
+
+test("every system event maps to the stock freedesktop asset", () => {
+  const expected = {
+    volumeUp: ASSET_DIR + "audio-volume-change.oga",
+    volumeDown: ASSET_DIR + "audio-volume-change.oga",
+    powerConnected: ASSET_DIR + "power-plug.oga",
+    powerDisconnected: ASSET_DIR + "power-unplug.oga"
+  }
+  for (const [name, asset] of Object.entries(expected))
+    assert.equal(Logic.assetPath(name), asset, name)
+})
+
+// ---------------------------------------------------- player command shape
+
+test("playerCommand builds a safe pw-play argv from asset and volume", () => {
+  assert.deepEqual(plain(Logic.playerCommand("/tmp/event.oga", 0.5)), ["/usr/bin/pw-play", "--volume", "0.5", "/tmp/event.oga"])
+  // Each argument is its own list entry: no shell, no quoting, so a
+  // whitespace-containing asset path stays one argv element.
+  assert.equal(Logic.playerCommand("dir with space/sound.oga", 0.25).length, 4)
+  assert.deepEqual(plain(Logic.playerCommand("dir with space/sound.oga", 0.25)), ["/usr/bin/pw-play", "--volume", "0.25", "dir with space/sound.oga"])
+  assert.equal(Logic.playerCommand("sound.oga", 0.35)[0], "/usr/bin/pw-play")
+  assert.equal(Logic.playerCommand("sound.oga", 0.35)[1], "--volume")
+  assert.equal(Logic.playerCommand("sound.oga", 0.35)[2], "0.35")
+  assert.equal(Logic.playerCommand("sound.oga", 0.35)[3], "sound.oga")
+})
+
+test("playerCommand volume is the plugin's per-stream relative gain", () => {
+  // The plugin volume is passed through as a relative pw-play stream gain;
+  // it never inverts the sink, routes directly to ALSA, or bypasses the
+  // system sink volume.
+  assert.equal(Logic.playerCommand("/tmp/event.oga", 0.5)[2], "0.5")
+  assert.equal(Logic.playerCommand("/tmp/event.oga", 1)[2], "1")
+  assert.equal(Logic.playerCommand("/tmp/event.oga", 0)[2], "0")
+})
+
+test("persisted settings round-trip and drive playback eligibility", () => {
   assert.equal(Logic.agentInputBlockedReason(agentGates()), "")
   // Desktop activation, ui-sounds overlap, and desktop readiness never gate
   // the agent-input cue.
   assert.equal(Logic.agentInputBlockedReason({ ...agentGates(), desktopEnabled: false }), "")
   assert.equal(Logic.agentInputBlockedReason({ ...agentGates(), overlapBlocked: true }), "")
   assert.equal(Logic.agentInputBlockedReason({ ...agentGates(), desktopReady: false }), "")
+  assert.equal(Logic.agentInputBlockedReason({ ...agentGates(), eventReady: false }), "")
   // Its own gates still apply, in order.
   assert.equal(Logic.agentInputBlockedReason({ ...agentGates(), settingsReady: false }), "settings not ready")
   assert.equal(Logic.agentInputBlockedReason({ ...agentGates(), enabled: false }), "muted")

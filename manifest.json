@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "nick.chime",
   "name": "Omarchy Chime",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Omarchy",
-  "description": "Desktop-sounds alpha 2: window open/close, workspace switches, agent needs-input cue, mute, volume, and previews.",
+  "description": "Desktop-sounds 0.3.0 candidate: window open/close, workspace switches, volume up/down, power connect/disconnect, and agent needs-input cues, mute, volume, and previews.",
   "kinds": [
     "service"
   ],

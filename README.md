@@ -1,23 +1,61 @@
 # Omarchy Chime
 
 Independent Omarchy shell plugin (`nick.chime`) that plays short desktop
-sounds and an agent needs-input cue. It owns no notification daemon, popup,
-history, or DND state — the built-in `omarchy.notifications` service keeps
-all of that.
+sounds, system volume/power cues, and an agent needs-input cue. It owns no
+notification daemon, popup, history, or DND state — the built-in
+`omarchy.notifications` service keeps all of that.
 
 ## Status
 
 - **0.1.0 (alpha 1)** — implemented and runtime-verified on the installed
   shell: window open/close and workspace-switch sounds, mute, volume,
   desktop activation, previews, DND/lock/idle gating.
-- **0.2.0 (alpha 2)** — implemented, installed, and runtime-verified on
-  the live desktop (2026-09-10), but **not committed, pushed, or
-  published**. The published remote still tracks alpha 1. Adds the
-  `agentNeedsInput` cue, the `agentInput on|off` switch, the
-  `preview agentNeedsInput` command, and a passive session D-Bus
-  observer.
+- **0.2.0 (alpha 2)** — published upstream. Adds the `agentNeedsInput` cue,
+  the `agentInput on|off` switch, the `preview agentNeedsInput` command,
+  and a passive session D-Bus observer. The alpha 2 candidate was verified
+  on the live desktop on 2026-09-10 (see the historical Alpha 2 summary
+  below).
+- **0.3.0 (alpha 3 candidate)** — implemented in this working tree on top
+  of published 0.2.0, but **not committed, pushed, or published**. Adds
+  volume up/down and power connection/disconnection cues, the latest-only
+  rapid-cue replacement rule, and new preview event names.
 
-### Alpha 2 verification summary
+### Current 0.3.0 candidate verification
+
+Current-source gates: **38 Node tests**
+(`node --test tests/controller.test.mjs tests/desktop.test.mjs
+tests/system.test.mjs`) and **36 Python unittest tests**
+(`python -m unittest discover -s tests -p observer_test.py`) pass; plugin
+validation is green and qmllint is clean across product QML/JS and the
+test harness. The isolated service harness passed: it exercises the real
+product service's safety-gated playback with injected DND/lock/idle
+objects. A live volume-up/down probe attached a source-loaded
+`SystemEvents.qml` adapter to the live default PipeWire sink: raising the
+output volume 0.65→0.66 emitted event ID `volumeUp`, restoring it
+0.66→0.65 emitted `volumeDown`, and `wpctl get-volume` confirmed the
+output volume back at 0.65. The candidate was not installed into the
+shell; that probe did not invoke ChimeController, play or audibly verify
+a cue, or change the plugin volume.
+
+Issue #2 is addressed in this candidate but the fix is only source-level
+so far: after the earlier busy-only fix landed, a second workspace switch
+commonly arrives after the previous cue's child process exits and during
+the 250 ms post-exit cooldown — both transitions share the event name
+`workspaceSwitched`, so a distinct-event-name cooldown policy still
+dropped it. The completed fix exempts automatic non-agent desktop and
+volume/power cues from the post-exit cooldown entirely (their source state
+machines already deduplicate non-transitions and the controller preempts a
+running voice); the cooldown still governs agent-input cues and previews.
+The live rapid-switch race has **not** been re-tested on the desktop yet —
+no redeployment or user confirmation has happened, and the orchestrator
+performs those.
+
+**Not yet performed (current candidate):** physical power plug/unplug
+transition (a real UPower on-battery change) and audible verification of
+the power cue. Multi-monitor audibility has not been re-exercised for this
+candidate either; coverage there remains deterministic tests only.
+
+### Alpha 2 verification summary (historical, published 0.2.0)
 
 Verified on the live desktop (2026-09-10): plugin validation green;
 qmllint clean across product QML/JS and the test harness; 24 Node tests
@@ -50,9 +88,9 @@ D-Bus session, not the real desktop bus.
 ## Install / update (omarchy plugin CLI)
 
 The published remote is https://github.com/rogersmitha51/OmarchyChime.git.
-The remote currently tracks **alpha 1** (0.1.0); the alpha 2 changes in
-this working tree are **uncommitted**, so a fresh clone installs alpha 1
-until they are committed and pushed.
+The remote currently tracks **0.2.0 (alpha 2)**; the 0.3.0 candidate
+changes in this working tree are **uncommitted**, so a fresh clone
+installs 0.2.0 until they are committed and pushed.
 
 A plugin installed via `omarchy plugin add` lives as a git checkout under
 `~/.config/omarchy/plugins/nick.chime` and is managed with the standard
@@ -84,16 +122,16 @@ refuses a plugin whose id is already installed. `omarchy plugin update`
 rolls back if the update fails validation. No other plugin or bar layout is
 ever modified by Chime.
 
-> **Candidate note.** The alpha 2 changes in this working tree are not yet
-> committed, and `git clone` only copies committed content. Installing from
-> a local path therefore installs the committed alpha 1 state until the
-> alpha 2 changes are committed and pushed. The installed plugin on this
-> machine is a plain copy, not a git checkout, so `omarchy plugin update`
-> does not apply to it.
+> **Candidate note.** The 0.3.0 candidate changes in this working tree are
+> not yet committed, and `git clone` only copies committed content.
+> Installing from a local path therefore installs the committed 0.2.0
+> state until the 0.3.0 changes are committed and pushed. The installed
+> plugin on this machine is a plain copy, not a git checkout, so
+> `omarchy plugin update` does not apply to it.
 
-### Trying the uncommitted alpha 2 candidate (maintainer-only)
+### Trying the uncommitted 0.3.0 candidate (maintainer-only)
 
-The alpha 2 candidate is not a published install, so there is no
+The 0.3.0 candidate is not a published install, so there is no
 supported end-user update path for it yet. A maintainer who wants to
 exercise the uncommitted working tree on a live shell can do so by
 swapping the installed plugin for the candidate in place:
@@ -156,12 +194,19 @@ omarchy-shell chime desktop on|off
 omarchy-shell chime agentInput on|off
 omarchy-shell chime preview agentNeedsInput
 omarchy-shell chime preview windowOpened
+omarchy-shell chime preview windowClosed
+omarchy-shell chime preview workspaceSwitched
+omarchy-shell chime preview volumeUp
+omarchy-shell chime preview volumeDown
+omarchy-shell chime preview powerConnected
+omarchy-shell chime preview powerDisconnected
 omarchy-shell chime help
 ```
 
-- `status` reports safety gates, controller state, the desktop adapter, and
-  the notification observer (`active`, `ready`) — never notification
-  contents.
+- `status` reports safety gates, controller state, the desktop adapter,
+  the volume/power (system) adapter (`active`, `ready`, source readiness,
+  current sink and readings), and the notification observer (`active`,
+  `ready`) — never notification contents.
 - `preview` plays the cue immediately, bypassing mute, event switches,
   overlap, and observer readiness, but always obeying DND/lock/idle
   safety, the single voice, and the cooldown.
@@ -172,10 +217,34 @@ omarchy-shell chime help
   owner explicitly chose to keep `agentInputEnabled: true` after the v1→v2
   migration. A fresh install starts with the default (off).
 
+## Volume semantics
+
+Chime's `volume` setting is a **per-stream relative alert gain**: it
+multiplies Chime's own output relative to the system's output volume. It
+does not set, bypass, or fight the system volume — the global PipeWire
+output volume (and its mute state) remains authoritative. This matches
+Apple/macOS guidance (the alert-relative volume is a multiplier on top of
+the system output volume) and normal desktop audio practice: system
+output volume governs overall loudness, and per-app/per-alert gain only
+scales the cue relative to the rest of the session. Muting or lowering
+the system output mutes or lowers Chime like any other audio; Chime's
+mute is its own master switch on top of that. Volume events are detected
+from the **default PipeWire sink**, so changing the output device simply
+switches which sink volume changes are watched.
+
+## Events and playback
+
+Automatic events: `windowOpened`, `windowClosed`, `workspaceSwitched`
+(desktop), `volumeUp`, `volumeDown` (default PipeWire sink volume
+changes), `powerConnected`, `powerDisconnected` (UPower AC/battery
+state), and `agentNeedsInput` (the passive observer). Desktop and system
+cues use stock freedesktop theme sounds (see `UPSTREAM.json` for the
+mappings); the agent-input cue is a local plugin asset.
+
 ## Settings and migration
 
 Settings live in `$XDG_CONFIG_HOME/omarchy/chime.json` (default
-`~/.config/omarchy/chime.json`). Alpha 2 uses schema **v2**:
+`~/.config/omarchy/chime.json`). Alpha 2 and later use schema **v2**:
 
 ```json
 {
@@ -199,10 +268,29 @@ or flip the agent switch on.
 
 ## Behavior and fail-closed policy
 
-- **Single voice, no queue.** Desktop and agent cues share one `pw-play`
-  voice. A cue arriving while one is playing or within the 250 ms cooldown
-  is dropped, never queued or replayed — a busy agent cue can be missed by
-  design.
+- **Single voice, no queue.** All cues share one `pw-play` voice. A cue
+  arriving while another cue is playing is dropped, never queued or
+  replayed — a busy agent cue can be missed by design. After a cue exits, a
+  250 ms cooldown governs agent-input cues and previews; automatic
+  non-agent events ignore it entirely (see below).
+- **Cooldown scope.** The post-exit cooldown applies only to agent-input
+  cues and previews. Automatic desktop and volume/power cues ignore it: a
+  second workspace switch, volume change, or power change arriving after
+  the previous cue's child process exited but while the cooldown window is
+  still open plays normally. Their source state machines already
+  deduplicate non-transitions, and the controller preempts a running voice,
+  so a rapid same-name repeat cannot sound twice — it is only the post-exit
+  gap that is no longer blocked.
+- **Latest-only rapid replacement.** Rapid, otherwise-eligible **automatic
+  non-agent** events (desktop and volume/power cues) preempt the current
+  cue: the current cue is cut and the newest event is retained as a single
+  latest-only pending replacement, which starts only after the old process
+  has actually exited — never overlapping it. A further automatic event
+  replaces that intent, so a burst of changes yields at most one final cue.
+  A **preview** or an **agent cue** is never preempted (and never preempts
+  another cue): the single voice stays strictly non-overlapping at all
+  times. A deliberately cut cue's release does not arm the cooldown, so the
+  cut cannot stall the agent-input cues and previews that still obey it.
 - **Agent-input gating.** Automatic agent cues require: settings decided,
   master unmuted, `agentInputEnabled`, session safe (no DND, unlocked,
   non-idle, real screen, settled startup), observer ready, cooldown
@@ -210,8 +298,15 @@ or flip the agent switch on.
   ui-sounds overlap, or desktop adapter readiness.
 - **Desktop gating.** Desktop cues additionally require `desktopEnabled`,
   no ui-sounds overlap, and desktop adapter readiness.
+- **System gating.** Volume/power cues use the same base policy (including
+  `desktopEnabled` and no ui-sounds overlap) plus `systemReady`, the
+  volume/power adapter's readiness. The adapter's two sources are
+  independent: the volume source needs the default PipeWire sink baseline,
+  the power source needs a UPower on-battery baseline, and each starts
+  silently so the first settling/current state never sounds.
 - **DND / lock / idle.** Any of these stops all playback and deactivates
-  the observer; nothing that happened while inactive sounds on recovery.
+  the adapters and observer; nothing that happened while inactive sounds on
+  recovery.
 - **Observer failure.** If the observer child fails, is missing, or hits
   backpressure, the adapter fails closed: no agent cue plays, and
   notification delivery, history, actions, and DND are untouched. The
@@ -240,13 +335,14 @@ normalized events cross into the controller.
 
 ## Dependencies
 
-- `pipewire-audio` (`pw-play`) and the freedesktop sound theme for desktop
-  events.
+- `pipewire-audio` (`pw-play`) and the freedesktop sound theme
+  (`sound-theme-freedesktop`) for desktop and system events.
 - `python-dbus` and `python-gobject` for the observer child (installed
   versions 1.4.0-2 / 3.56.3-1; ordinary-user session monitoring needs no
   elevation or policy changes).
 - The agent-input cue is a local plugin asset
-  (`assets/agent-needs-input.wav`); see `UPSTREAM.json` for provenance.
+  (`assets/agent-needs-input.wav`); see `UPSTREAM.json` for provenance and
+  the full event-to-asset mapping.
 
 ## Verification prerequisites (maintainer-only)
 
@@ -270,12 +366,15 @@ the real user's XDG config. The harness drives the agent-input gate through
 the isolated config's settings file and never touches the real desktop
 state.
 
-The harness is not a substitute for live-desktop verification of the alpha 2
+The harness is not a substitute for live-desktop verification of the 0.3.0
 candidate: it exercises service-state safety transitions, not real-agent
-playback, freshness, suppression, or observer lifecycle. Passing it does not
-prove the v1→v2 migration (the harness seeds a complete v2 fixture). Alpha 2
-was verified separately on the live desktop (see the verification summary
-above); the harness alone would not have been sufficient.
+playback, freshness, suppression, or observer lifecycle. Passing it does
+not prove the v1→v2 migration (the harness seeds a complete v2 fixture).
+For the current candidate, live default-sink volume changes were probed
+via a source-loaded adapter (not an installed candidate) — see the
+candidate verification summary above — while the physical power
+plug/unplug transition and audible power-cue verification have **not**
+been performed yet.
 
 ## Uninstall
 

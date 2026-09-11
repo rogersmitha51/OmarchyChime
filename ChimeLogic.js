@@ -7,20 +7,28 @@
 // the FileView/Process lifecycle and calls into these functions for parsing,
 // validation, and playback policy.
 
-var EVENT_IDS = ["windowOpened", "windowClosed", "workspaceSwitched", "agentNeedsInput"]
+var EVENT_IDS = ["windowOpened", "windowClosed", "workspaceSwitched", "agentNeedsInput", "volumeUp", "volumeDown", "powerConnected", "powerDisconnected"]
+
+// The four system events: volume and power-state cues driven by the session
+// bus, gated by the caller with the system adapter's readiness.
+var SYSTEM_EVENT_IDS = ["volumeUp", "volumeDown", "powerConnected", "powerDisconnected"]
 
 var ASSET_DIR = "/usr/share/sounds/freedesktop/stereo/"
 
 // The agent-input cue is a local plugin asset; ChimeController resolves the
 // relative path through Qt.resolvedUrl (decoded file URL) so playback never
-// depends on the host shell's working directory. Desktop events keep the
-// stock freedesktop sound theme.
+// depends on the host shell's working directory. Desktop and system events
+// keep the stock freedesktop sound theme.
 var AGENT_ASSET = "assets/agent-needs-input.wav"
 
 var ASSET_NAMES = {
   windowOpened: ASSET_DIR + "device-added.oga",
   windowClosed: ASSET_DIR + "device-removed.oga",
   workspaceSwitched: ASSET_DIR + "audio-volume-change.oga",
+  volumeUp: ASSET_DIR + "audio-volume-change.oga",
+  volumeDown: ASSET_DIR + "audio-volume-change.oga",
+  powerConnected: ASSET_DIR + "power-plug.oga",
+  powerDisconnected: ASSET_DIR + "power-unplug.oga",
   agentNeedsInput: AGENT_ASSET
 }
 
@@ -57,6 +65,10 @@ function isValidEvent(name) {
 // agent-input switch cuts only agent-input cues.
 function isAgentEvent(name) {
   return String(name || "") === "agentNeedsInput"
+}
+
+function isSystemEvent(name) {
+  return SYSTEM_EVENT_IDS.indexOf(String(name || "")) !== -1
 }
 
 function assetPath(eventName) {
@@ -157,19 +169,26 @@ function decideSettings(current, result) {
   return { settings: defaults(), source: "defaults", error: result.error }
 }
 
-// First blocking reason for desktop automatic playback, or "" when every
+// First blocking reason for automatic desktop playback, or "" when every
 // gate passes. Order matters: settings decided, master on, desktop sounds
-// explicitly activated, no overlap, safe session, desktop adapter ready,
-// cooldown elapsed, no held playback claim (same-tick overlapping requests
-// are rejected). Desktop gates never govern the agent-input cue.
+// explicitly activated, no overlap, safe session, the caller-selected event
+// adapter ready (the caller passes whichever source readiness governs the
+// event kind — desktop adapter readiness for desktop events, system adapter
+// readiness for system events), no held playback claim (same-tick
+// overlapping requests are rejected). Automatic non-agent events ignore the
+// post-exit cooldown entirely: the desktop/system source state machines
+// already deduplicate non-transitions, and the controller preempts while a
+// voice is running, so a rapid repeated event (e.g. a second
+// workspaceSwitched arriving after the previous child exited but during the
+// cooldown window) must stay eligible. Desktop-style gates never govern the
+// agent-input cue, which keeps its own cooldown gate.
 function automaticBlockedReason(state) {
   if (!state || !state.settingsReady) return "settings not ready"
   if (!state.enabled) return "muted"
   if (!state.desktopEnabled) return "desktop sounds disabled"
   if (state.overlapBlocked) return "blocked by ui-sounds"
   if (!state.safetyReady) return "not safe"
-  if (!state.desktopReady) return "desktop not ready"
-  if (state.cooldownActive) return "cooldown"
+  if (!state.eventReady) return "event source not ready"
   if (state.playing) return "busy"
   return ""
 }
@@ -178,8 +197,10 @@ function automaticBlockedReason(state) {
 // every gate passes. The agent-input gate deliberately does NOT depend on
 // desktop activation, ui-sounds overlap, or desktop adapter readiness: an
 // agent asking for input is relevant even when desktop sounds are off. It
-// still shares the master switch, session safety, the single voice, and the
-// cooldown with desktop playback.
+// still shares the master switch, session safety, and the single voice with
+// desktop playback, and it keeps the post-exit cooldown as its own gate —
+// agent input remains defended against rapid repeats, unlike automatic
+// non-agent events which ignore the cooldown entirely.
 function agentInputBlockedReason(state) {
   if (!state || !state.settingsReady) return "settings not ready"
   if (!state.enabled) return "muted"
