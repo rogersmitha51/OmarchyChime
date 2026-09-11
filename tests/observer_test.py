@@ -30,8 +30,11 @@ class FakeCall(dbus.lowlevel.MethodCallMessage):
     get_serial()/get_sender() overrides are what the observer sees.
     """
 
-    def __init__(self, serial, sender=":1.5", app="Oh My Pi", body="Waiting for input",
+    def __init__(self, serial, sender=":1.5", app="Oh My Pi", title="Waiting for input",
+                 body="Waiting for input",
                  replaces=0, hints=None, timeout=-1, destination=None, path=None):
+        # app/body defaults are arbitrary: the observer never classifies
+        # notification contents.
         super().__init__("org.freedesktop.Notifications",
                          "/org/freedesktop/Notifications",
                          "org.freedesktop.Notifications", "Notify")
@@ -41,7 +44,7 @@ class FakeCall(dbus.lowlevel.MethodCallMessage):
             self.set_destination(destination)
         if path is not None:
             self.set_path(path)
-        self.append(app, replaces, "", "s", body, [], hints or {}, timeout,
+        self.append(app, replaces, title, "s", body, [], hints or {}, timeout,
                     signature=NOTIFY_SIG)
 
     def get_serial(self):
@@ -130,27 +133,24 @@ class ClassificationTests(ObserverTestBase):
     def test_exact_match_emits(self):
         call = self.notify()
         self.reply(call, 42)
-        self.assertEqual(self.event_types(), ["agentNeedsInput"])
+        self.assertEqual(self.event_types(), ["notificationReceived"])
 
-    def test_wrong_app_silent(self):
+    def test_unrelated_app_emits(self):
         call = self.notify(app="Other App")
         self.reply(call, 42)
-        self.assertEqual(self.event_types(), [])
+        self.assertEqual(self.event_types(), ["notificationReceived"])
 
-    def test_wrong_body_silent(self):
+    def test_unrelated_body_emits(self):
         call = self.notify(body="Different body")
         self.reply(call, 42)
-        self.assertEqual(self.event_types(), [])
+        self.assertEqual(self.event_types(), ["notificationReceived"])
 
-    def test_case_sensitive(self):
-        call = self.notify(app="oh my pi")
-        self.reply(call, 42)
-        self.assertEqual(self.event_types(), [])
-
-    def test_unrelated_app_with_same_words_silent(self):
-        call = self.notify(app="Oh My Pi Launcher", body="Waiting for input")
-        self.reply(call, 42)
-        self.assertEqual(self.event_types(), [])
+    def test_empty_and_arbitrary_contents_emit(self):
+        # The cue is universal: arbitrary app/title/body never disqualify.
+        for app, title, body in [("", "", ""), ("Web Browser", "Inbox", "You have mail")]:
+            call = self.notify(app=app, title=title, body=body)
+            self.reply(call, 42)
+        self.assertEqual(self.event_types(), ["notificationReceived", "notificationReceived"])
 
     def test_wrong_signature_ignored(self):
         msg = dbus.lowlevel.MethodCallMessage(
@@ -186,7 +186,7 @@ class SuppressionTests(ObserverTestBase):
     def test_boolean_false_emits(self):
         call = self.notify(hints={"suppress-sound": dbus.Boolean(False)})
         self.reply(call, 42)
-        self.assertEqual(self.event_types(), ["agentNeedsInput"])
+        self.assertEqual(self.event_types(), ["notificationReceived"])
 
     def test_python_bool_true_suppresses(self):
         call = self.notify(hints={"suppress-sound": True})
@@ -206,24 +206,24 @@ class SuppressionTests(ObserverTestBase):
     def test_absent_hint_emits(self):
         call = self.notify(hints={})
         self.reply(call, 42)
-        self.assertEqual(self.event_types(), ["agentNeedsInput"])
+        self.assertEqual(self.event_types(), ["notificationReceived"])
 
     def test_unknown_hint_ignored(self):
         call = self.notify(hints={"urgency": dbus.Byte(1)})
         self.reply(call, 42)
-        self.assertEqual(self.event_types(), ["agentNeedsInput"])
+        self.assertEqual(self.event_types(), ["notificationReceived"])
 
 
 class ReplyPolicyTests(ObserverTestBase):
     def test_replaces_zero_emits(self):
         call = self.notify(replaces=0)
         self.reply(call, 42)
-        self.assertEqual(self.event_types(), ["agentNeedsInput"])
+        self.assertEqual(self.event_types(), ["notificationReceived"])
 
     def test_id_differs_from_replaces_emits(self):
         call = self.notify(replaces=7)
         self.reply(call, 42)
-        self.assertEqual(self.event_types(), ["agentNeedsInput"])
+        self.assertEqual(self.event_types(), ["notificationReceived"])
 
     def test_id_equals_replaces_silent(self):
         call = self.notify(replaces=42)
@@ -272,10 +272,10 @@ class ReplyPolicyTests(ObserverTestBase):
         second = self.notify(serial=10, sender=":1.6")
         self.assertEqual(self.observer.pending_count(), 2)
         self.reply(first, 42)
-        self.assertEqual(self.event_types(), ["agentNeedsInput"])
+        self.assertEqual(self.event_types(), ["notificationReceived"])
         self.assertEqual(self.observer.pending_count(), 1)
         self.reply(second, 43)
-        self.assertEqual(self.event_types(), ["agentNeedsInput", "agentNeedsInput"])
+        self.assertEqual(self.event_types(), ["notificationReceived", "notificationReceived"])
         self.assertEqual(self.observer.pending_count(), 0)
 
 

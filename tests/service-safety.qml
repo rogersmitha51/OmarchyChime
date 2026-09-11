@@ -3,11 +3,11 @@
 //
 // This is an OPTIONAL real-desktop integration harness, NOT a hermetic
 // Node/unittest case. It must run on a live desktop: a running Wayland
-// session under Hyprland, the original Omarchy notification service
-// (omarchy.notifications) present as the notification owner, and the
-// observer's python-dbus / python-gobject dependencies installed. Without
-// those, the harness cannot exercise the real product and must not be
-// treated as a passing unit test.
+// session under Hyprland, a notification server (the Omarchy notification
+// service, omarchy.notifications) present as the notification owner, and
+// the observer's python-dbus / python-gobject dependencies installed.
+// Without those, the harness cannot exercise the real product and must not
+// be treated as a passing unit test.
 //
 // This file is loaded as a component by a thin wrapper shell.qml (parent
 // launches `qs -p <configdir>` with a real Wayland session and an isolated
@@ -37,11 +37,13 @@
 // Failure: prints CHIME_SERVICE_SAFETY_FAIL <step>: <detail> and exits nonzero.
 //
 // The harness never calls preview, never enables desktop sounds, and never
-// touches the real user's desktop state or settings. The agent-input gate
+// touches the real user's desktop state or settings. The notification gate
 // is driven through the isolated config's settings file (hot-reloaded by
 // the real service), so the observer's host-side `active` flag is
 // exercised through the real statusJson() output — no fake observer, no
-// echo assertions.
+// echo assertions. Omarchy's notification service remains the notification
+// owner throughout: the harness never owns a notification daemon, popup,
+// history, or DND state.
 
 import QtQuick
 import Quickshell
@@ -113,8 +115,8 @@ ShellRoot {
 
     // ------------------------------------------------------------ settings writer
 
-    // The agent-input gate is driven through the real settings file: the
-    // harness writes a complete v2 file into the isolated config dir and the
+    // The notification gate is driven through the real settings file: the
+    // harness writes a complete v3 file into the isolated config dir and the
     // service's FileView hot-reloads it. FileView cannot watch a missing
     // parent, so the parent launcher MUST create the isolated
     // XDG_CONFIG_HOME/omarchy directory (seeding settings is allowed) BEFORE
@@ -226,7 +228,7 @@ ShellRoot {
     }
 
     function runStep() {
-        var labels = ["inject host fakes", "initial ready state", "dnd on", "dnd off", "lock on", "unlock", "idle on", "idle off", "screensaver started on", "screensaver window count on", "screensaver window count off", "invalid dnd type", "valid dnd restored", "missing services", "null shell", "services restored", "wholesale replacement", "old instance mutations", "registry unknown", "registry strict false", "registry true", "registry missing + continue", "agent input off by default", "agent input on starts observer", "agent input off stops observer", "agent input gated by safety", "agent input safety cleared", "system ready while safe", "system deactivated by dnd", "system reactivated after dnd cleared", "pass"];
+        var labels = ["inject host fakes", "initial ready state", "dnd on", "dnd off", "lock on", "unlock", "idle on", "idle off", "screensaver started on", "screensaver window count on", "screensaver window count off", "invalid dnd type", "valid dnd restored", "missing services", "null shell", "services restored", "wholesale replacement", "old instance mutations", "registry unknown", "registry strict false", "registry true", "registry missing + continue", "notifications off by default", "notifications on starts observer", "notifications off stops observer", "notifications gated by safety", "notifications safety cleared", "system ready while safe", "system deactivated by dnd", "system reactivated after dnd cleared", "pass"];
         console.log("CHIME_SERVICE_SAFETY_STEP " + harness.step + " " + labels[harness.step]);
         switch (harness.step) {
         case 0:
@@ -561,79 +563,79 @@ ShellRoot {
         harness.step++;
     }
 
-    // ------------------------------------------------------------ agent input gate
+    // ------------------------------------------------------------ notification gate
 
-    // The agent-input observer must be off by default. These steps write a
-    // complete v2 file with agentInputEnabled false — the same default the
-    // v1->v2 migration produces (migration itself is covered by
+    // The notification observer must be off by default. These steps write a
+    // complete v3 file with notificationsEnabled false — the same default the
+    // v1->v3 migration produces (migration itself is covered by
     // tests/controller.test.mjs) — so the host never activates the observer
     // and its readiness stays false. No fake observer is involved: these
     // steps drive the real settings file and read the real statusJson()
     // output.
     function step21() {
         var s = harness.status();
-        harness.check(s.controller.agentInputEnabled === false, "agent input off by default");
-        harness.check(s.controller.agentInputReady === false, "agent input not ready while off");
-        harness.check(s.notification.active === false, "observer inactive while agent input off");
+        harness.check(s.controller.notificationsEnabled === false, "notifications off by default");
+        harness.check(s.controller.notificationReady === false, "notifications not ready while off");
+        harness.check(s.notification.active === false, "observer inactive while notifications off");
         harness.check(s.notification.ready === false, "observer not ready while inactive");
         harness.writeSettings({
-            version: 2,
+            version: 3,
             enabled: true,
             volume: 0,
             desktopEnabled: false,
-            agentInputEnabled: true
+            notificationsEnabled: true
         });
         harness.beginWait(function () {
             var st = harness.status();
-            return st && st.controller.agentInputEnabled === true && st.notification.active === true && st.notification.ready === true && st.controller.agentInputReady === true;
-        }, "agent input on: observer active and ready", 15000);
+            return st && st.controller.notificationsEnabled === true && st.notification.active === true && st.notification.ready === true && st.controller.notificationReady === true;
+        }, "notifications on: observer active and ready", 15000);
     }
 
     function step22() {
         var s = harness.status();
-        harness.check(s.controller.agentInputEnabled === true, "agent input enabled");
-        harness.check(s.notification.active === true, "observer active while agent input on");
+        harness.check(s.controller.notificationsEnabled === true, "notifications enabled");
+        harness.check(s.notification.active === true, "observer active while notifications on");
         harness.check(s.notification.ready === true, "observer ready while active");
-        harness.check(s.controller.agentInputReady === true, "controller agent input ready");
+        harness.check(s.controller.notificationReady === true, "controller notifications ready");
         harness.writeSettings({
-            version: 2,
+            version: 3,
             enabled: true,
             volume: 0,
             desktopEnabled: false,
-            agentInputEnabled: false
+            notificationsEnabled: false
         });
         harness.beginWait(function () {
             var st = harness.status();
-            return st && st.controller.agentInputEnabled === false && st.notification.active === false && st.notification.ready === false && st.controller.agentInputReady === false;
-        }, "agent input off: observer stopped and readiness cleared", 15000);
+            return st && st.controller.notificationsEnabled === false && st.notification.active === false && st.notification.ready === false && st.controller.notificationReady === false;
+        }, "notifications off: observer stopped and readiness cleared", 15000);
     }
 
     function step23() {
         var s = harness.status();
-        harness.check(s.controller.agentInputEnabled === false, "agent input off");
-        harness.check(s.notification.active === false, "observer stopped when agent input off");
+        harness.check(s.controller.notificationsEnabled === false, "notifications off");
+        harness.check(s.notification.active === false, "observer stopped when notifications off");
         harness.check(s.notification.ready === false, "observer readiness cleared when off");
-        harness.check(s.controller.agentInputReady === false, "controller agent input not ready when off");
+        harness.check(s.controller.notificationReady === false, "controller notifications not ready when off");
         harness.writeSettings({
-            version: 2,
+            version: 3,
             enabled: true,
             volume: 0,
             desktopEnabled: false,
-            agentInputEnabled: true
+            notificationsEnabled: true
         });
         harness.beginWait(function () {
             var st = harness.status();
-            return st && st.controller.agentInputEnabled === true && st.notification.active === true && st.notification.ready === true;
-        }, "agent input re-enabled: observer active and ready", 15000);
+            return st && st.controller.notificationsEnabled === true && st.notification.active === true && st.notification.ready === true;
+        }, "notifications re-enabled: observer active and ready", 15000);
     }
 
     // The observer must not run while the session is unsafe: safety loss
-    // deactivates it even with agent input enabled, and readiness clears.
+    // deactivates it even with notifications enabled, and readiness clears.
     // Mutate the currently bound DND instance (fakeDnd2, installed in
     // step 14) — the old fakeDnd is deliberately ignored by the service.
     function step24() {
         var s = harness.status();
-        harness.check(s.controller.agentInputEnabled === true, "agent input on");
+        harness.check(s.controller.notificationsEnabled === true, "notifications on");
         harness.check(s.notification.active === true, "observer active while safe");
         fakeDnd2.doNotDisturb = true;
         harness.beginWait(function () {
@@ -647,7 +649,7 @@ ShellRoot {
         harness.check(s.safety.ready === false, "dnd blocks ready");
         harness.check(s.notification.active === false, "observer deactivated by dnd");
         harness.check(s.notification.ready === false, "observer readiness cleared on deactivation");
-        harness.check(s.controller.agentInputReady === false, "controller agent input not ready while unsafe");
+        harness.check(s.controller.notificationReady === false, "controller notifications not ready while unsafe");
         harness.step++;
     }
 
@@ -739,15 +741,15 @@ ShellRoot {
     }
 
     Component.onCompleted: {
-        // Deterministic start: a clean v2 file with agent input off, so the
+        // Deterministic start: a clean v3 file with notifications off, so the
         // default-off assertions hold even if the isolated config dir is reused
         // across runs. The service's FileView hot-reloads it.
         harness.writeSettings({
-            version: 2,
+            version: 3,
             enabled: true,
             volume: 0,
             desktopEnabled: false,
-            agentInputEnabled: false
+            notificationsEnabled: false
         });
         harness._originalServices = {
             "omarchy.notifications": fakeDnd,

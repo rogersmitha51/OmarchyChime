@@ -1,9 +1,10 @@
 # Omarchy Chime
 
 Independent Omarchy shell plugin (`nick.chime`) that plays short desktop
-sounds, system volume/power cues, and an agent needs-input cue. It owns no
-notification daemon, popup, history, or DND state — the built-in
-`omarchy.notifications` service keeps all of that.
+sounds, system volume/power cues, and a universal notification cue. It owns
+no notification daemon, popup, history, or DND state — the built-in
+`omarchy.notifications` service remains the notification owner and keeps
+all of that.
 
 ## Status
 
@@ -18,13 +19,17 @@ notification daemon, popup, history, or DND state — the built-in
 - **0.3.0 (alpha 3 candidate)** — implemented in this working tree on top
   of published 0.2.0, but **not committed, pushed, or published**. Adds
   volume up/down and power connection/disconnection cues, the latest-only
-  rapid-cue replacement rule, and new preview event names.
+  rapid-cue replacement rule, a universal notification cue (`notificationReceived`)
+  for every newly accepted non-suppressed notification, the
+  `notifications on|off` switch, and v3 settings with v2 migration.
+  Historical alpha-2 behavior (agent-needs-input only) is documented below
+  and no longer reflects this candidate.
 
 ### Current 0.3.0 candidate verification
 
-Current-source gates: **38 Node tests**
+Current-source gates: **44 Node tests**
 (`node --test tests/controller.test.mjs tests/desktop.test.mjs
-tests/system.test.mjs`) and **36 Python unittest tests**
+tests/system.test.mjs`) and **35 Python unittest tests**
 (`python -m unittest discover -s tests -p observer_test.py`) pass; plugin
 validation is green and qmllint is clean across product QML/JS and the
 test harness. The isolated service harness passed: it exercises the real
@@ -45,7 +50,7 @@ the 250 ms post-exit cooldown — both transitions share the event name
 dropped it. The completed fix exempts automatic non-agent desktop and
 volume/power cues from the post-exit cooldown entirely (their source state
 machines already deduplicate non-transitions and the controller preempts a
-running voice); the cooldown still governs agent-input cues and previews.
+running voice); the cooldown still governs notification cues and previews.
 The live rapid-switch race has **not** been re-tested on the desktop yet —
 no redeployment or user confirmation has happened, and the orchestrator
 performs those.
@@ -56,6 +61,10 @@ the power cue. Multi-monitor audibility has not been re-exercised for this
 candidate either; coverage there remains deterministic tests only.
 
 ### Alpha 2 verification summary (historical, published 0.2.0)
+
+> Historical record for the published 0.2.0 (alpha 2) state only. The
+> current 0.3.0 candidate supersedes it: the agent-needs-input cue became
+> a universal notification cue (see the current-candidate sections above).
 
 Verified on the live desktop (2026-09-10): plugin validation green;
 qmllint clean across product QML/JS and the test harness; 24 Node tests
@@ -191,8 +200,8 @@ omarchy-shell chime mute
 omarchy-shell chime unmute
 omarchy-shell chime volume 0.35
 omarchy-shell chime desktop on|off
-omarchy-shell chime agentInput on|off
-omarchy-shell chime preview agentNeedsInput
+omarchy-shell chime notifications on|off
+omarchy-shell chime preview notificationReceived
 omarchy-shell chime preview windowOpened
 omarchy-shell chime preview windowClosed
 omarchy-shell chime preview workspaceSwitched
@@ -210,12 +219,14 @@ omarchy-shell chime help
 - `preview` plays the cue immediately, bypassing mute, event switches,
   overlap, and observer readiness, but always obeying DND/lock/idle
   safety, the single voice, and the cooldown.
-- `agentInput on|off` is the persistent per-event switch. It **defaults to
-  off**; the observer child only runs while it is on (and the session is
-  safe, settings are decided, and the master switch is on). The default is
-  off, but the current installed state on this machine has it **on** — the
-  owner explicitly chose to keep `agentInputEnabled: true` after the v1→v2
-  migration. A fresh install starts with the default (off).
+- `notifications on|off` is the persistent per-event switch for
+  notification cues. It **defaults to off**; the observer child only runs
+  while it is on (and the session is safe, settings are decided, and the
+  master switch is on). The default is off, but the current installed state
+  on this machine has it **on** — the owner explicitly chose to keep
+  `notificationsEnabled: true` after the v2→v3 migration (the old
+  `agentInputEnabled` value was carried over verbatim). A fresh install
+  starts with the default (off).
 
 ## Volume semantics
 
@@ -237,43 +248,52 @@ switches which sink volume changes are watched.
 Automatic events: `windowOpened`, `windowClosed`, `workspaceSwitched`
 (desktop), `volumeUp`, `volumeDown` (default PipeWire sink volume
 changes), `powerConnected`, `powerDisconnected` (UPower AC/battery
-state), and `agentNeedsInput` (the passive observer). Desktop and system
-cues use stock freedesktop theme sounds (see `UPSTREAM.json` for the
-mappings); the agent-input cue is a local plugin asset.
+state), and `notificationReceived` (the universal notification cue, emitted
+once per newly accepted non-suppressed notification; updates/replacements
+and suppressed notifications stay silent — the passive observer). Desktop
+and system cues use stock freedesktop theme sounds (see `UPSTREAM.json`
+for the mappings); the notification cue is a local plugin asset.
 
 ## Settings and migration
 
 Settings live in `$XDG_CONFIG_HOME/omarchy/chime.json` (default
-`~/.config/omarchy/chime.json`). Alpha 2 and later use schema **v2**:
+`~/.config/omarchy/chime.json`). The 0.3.0 candidate uses schema **v3**:
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "enabled": true,
   "volume": 1,
   "desktopEnabled": true,
-  "agentInputEnabled": true
+  "notificationsEnabled": true
 }
 ```
 
-A complete alpha-1 (v1) file is accepted and migrated with
-`agentInputEnabled: false`, preserving `enabled`, `volume`, and
+A complete alpha-2 (v2) file is accepted and migrated with the old
+`agentInputEnabled` value carried over **verbatim** into
+`notificationsEnabled` (the two switches are the same per-event gate;
+alpha 2 called it `agentInput on|off`, the 0.3.0 candidate calls it
+`notifications on|off`), preserving `enabled`, `volume`, and
+`desktopEnabled`. A complete alpha-1 (v1) file is accepted and migrated
+with `notificationsEnabled: false`, preserving `enabled`, `volume`, and
 `desktopEnabled`. The values above are the current installed state on
-this machine: the owner explicitly chose to keep `agentInputEnabled: true`
-(and the migrated `enabled`/`volume`/`desktopEnabled` values) after the
-migration. Invalid or incomplete files are never overwritten: the
-last valid settings are preserved and the error is reported in `status`.
-Missing required state means silence — a malformed reload can never unmute
-or flip the agent switch on.
+this machine: the owner explicitly chose to keep
+`notificationsEnabled: true` (carried over from alpha 2's
+`agentInputEnabled: true`, with the migrated `enabled`/`volume`/
+`desktopEnabled` values) after the v2→v3 migration. A fresh install
+starts with the default (notifications off). Invalid or incomplete files
+are never overwritten: the last valid settings are preserved and the
+error is reported in `status`. Missing required state means silence — a
+malformed reload can never unmute or flip the notifications switch on.
 
 ## Behavior and fail-closed policy
 
 - **Single voice, no queue.** All cues share one `pw-play` voice. A cue
   arriving while another cue is playing is dropped, never queued or
-  replayed — a busy agent cue can be missed by design. After a cue exits, a
-  250 ms cooldown governs agent-input cues and previews; automatic
-  non-agent events ignore it entirely (see below).
-- **Cooldown scope.** The post-exit cooldown applies only to agent-input
+  replayed — a busy notification cue can be missed by design. After a cue
+  exits, a 250 ms cooldown governs notification cues and previews;
+  automatic non-notification events ignore it entirely (see below).
+- **Cooldown scope.** The post-exit cooldown applies only to notification
   cues and previews. Automatic desktop and volume/power cues ignore it: a
   second workspace switch, volume change, or power change arriving after
   the previous cue's child process exited but while the cooldown window is
@@ -282,20 +302,21 @@ or flip the agent switch on.
   so a rapid same-name repeat cannot sound twice — it is only the post-exit
   gap that is no longer blocked.
 - **Latest-only rapid replacement.** Rapid, otherwise-eligible **automatic
-  non-agent** events (desktop and volume/power cues) preempt the current
-  cue: the current cue is cut and the newest event is retained as a single
-  latest-only pending replacement, which starts only after the old process
-  has actually exited — never overlapping it. A further automatic event
-  replaces that intent, so a burst of changes yields at most one final cue.
-  A **preview** or an **agent cue** is never preempted (and never preempts
-  another cue): the single voice stays strictly non-overlapping at all
-  times. A deliberately cut cue's release does not arm the cooldown, so the
-  cut cannot stall the agent-input cues and previews that still obey it.
-- **Agent-input gating.** Automatic agent cues require: settings decided,
-  master unmuted, `agentInputEnabled`, session safe (no DND, unlocked,
-  non-idle, real screen, settled startup), observer ready, cooldown
-  elapsed, voice free. They do **not** depend on desktop activation,
-  ui-sounds overlap, or desktop adapter readiness.
+  non-notification** events (desktop and volume/power cues) preempt the
+  current cue: the current cue is cut and the newest event is retained as a
+  single latest-only pending replacement, which starts only after the old
+  process has actually exited — never overlapping it. A further automatic
+  event replaces that intent, so a burst of changes yields at most one
+  final cue. A **preview** or a **notification cue** is never preempted
+  (and never preempts another cue): the single voice stays strictly
+  non-overlapping at all times. A deliberately cut cue's release does not
+  arm the cooldown, so the cut cannot stall the notification cues and
+  previews that still obey it.
+- **Notification gating.** Automatic notification cues require: settings
+  decided, master unmuted, `notificationsEnabled`, session safe (no DND,
+  unlocked, non-idle, real screen, settled startup), observer ready,
+  cooldown elapsed, voice free. They do **not** depend on desktop
+  activation, ui-sounds overlap, or desktop adapter readiness.
 - **Desktop gating.** Desktop cues additionally require `desktopEnabled`,
   no ui-sounds overlap, and desktop adapter readiness.
 - **System gating.** Volume/power cues use the same base policy (including
@@ -308,30 +329,33 @@ or flip the agent switch on.
   the adapters and observer; nothing that happened while inactive sounds on
   recovery.
 - **Observer failure.** If the observer child fails, is missing, or hits
-  backpressure, the adapter fails closed: no agent cue plays, and
+  backpressure, the adapter fails closed: no notification cue plays, and
   notification delivery, history, actions, and DND are untouched. The
   observer is restarted with a bounded delay while active; readiness is
   cleared before any stop/restart. Unload, disable, or hot reload stops
   the child; it also exits on owner changes or disconnect.
 - **Freshness and ambiguity.** Only successful typed `Notify` replies are
-  eligible. Valid replacements, failed/unmatched/stale calls, and events
-  older than 250 ms stay silent. Per the approved issue #4 policy, an
-  accepted notification whose reply id equals its `replaces_id` (a valid
-  update or a genuinely new stale-id collision) stays silent — a genuinely
-  new cue can be missed in that ambiguous case, by design.
+  eligible. Failed, unmatched, or stale calls, and events older than
+  250 ms stay silent. The cue is universal across apps — a genuine
+  replacement/update (the returned id equals the call's `replaces_id`,
+  per the approved issue #4 policy) stays silent, so an update to an
+  existing notification never re-cues; a genuinely new notification whose
+  stale-id reply collides with its `replaces_id` can be missed in that
+  ambiguous case, by design.
 
-## Agent classification (version-sensitive)
+## Notification events
 
-The supported agent contract is the installed Oh My Pi desktop fallback:
-app label `Oh My Pi` with body `Waiting for input`, as of `omp/18.1.16`.
-This is a version-sensitive wording match, not an authenticated identity —
-app labels are classification hints only. Session titles are never used to
-classify. Unrelated apps using the same wording, agent completion
-notifications, ordinary notifications, and unknown payloads do not
-trigger the cue. Typed sender sound-suppression hints are honored before
-an eligible cue is emitted; an invalid suppression state fails closed
-(silence). No notification contents are logged or persisted — only
-normalized events cross into the controller.
+Every newly accepted, non-suppressed notification — from any app, with
+any title or body — yields one `notificationReceived` event and one
+universal cue. Notification contents are never used to classify: app
+labels, titles, and bodies are ignored. Only the typed `suppress-sound`
+sender hint is honored before a cue is emitted; an invalid suppression
+state fails closed (silence). Genuine updates/replacements stay silent
+(see the freshness policy above). Omarchy's notification service remains
+the owner of notification delivery, popup, history, and DND: this plugin
+only passively observes the session bus and plays sounds. No notification
+contents are logged or persisted — only normalized events cross into the
+controller.
 
 ## Dependencies
 
@@ -340,9 +364,11 @@ normalized events cross into the controller.
 - `python-dbus` and `python-gobject` for the observer child (installed
   versions 1.4.0-2 / 3.56.3-1; ordinary-user session monitoring needs no
   elevation or policy changes).
-- The agent-input cue is a local plugin asset
-  (`assets/agent-needs-input.wav`); see `UPSTREAM.json` for provenance and
-  the full event-to-asset mapping.
+- The notification cue is a local plugin asset
+  (`assets/agent-needs-input.wav`; the file name and provenance are kept
+  from alpha 2 — only its semantic role changed, from the agent
+  needs-input cue to the universal notification cue); see `UPSTREAM.json`
+  for provenance and the full event-to-asset mapping.
 
 ## Verification prerequisites (maintainer-only)
 
@@ -362,17 +388,17 @@ The harness is loaded by a thin wrapper `shell.qml` that launches
 **must create the isolated `XDG_CONFIG_HOME/omarchy` directory (seeding
 settings is allowed) BEFORE loading the product**, because the service's
 FileView cannot watch a missing parent. Never launch the harness against
-the real user's XDG config. The harness drives the agent-input gate through
-the isolated config's settings file and never touches the real desktop
-state.
+the real user's XDG config. The harness drives the notifications gate
+through the isolated config's settings file and never touches the real
+desktop state.
 
 The harness is not a substitute for live-desktop verification of the 0.3.0
-candidate: it exercises service-state safety transitions, not real-agent
-playback, freshness, suppression, or observer lifecycle. Passing it does
-not prove the v1→v2 migration (the harness seeds a complete v2 fixture).
-For the current candidate, live default-sink volume changes were probed
-via a source-loaded adapter (not an installed candidate) — see the
-candidate verification summary above — while the physical power
+candidate: it exercises service-state safety transitions, not real
+notification playback, freshness, suppression, or observer lifecycle.
+Passing it does not prove the v2→v3 migration (the harness seeds a complete
+v3 fixture). For the current candidate, live default-sink volume changes
+were probed via a source-loaded adapter (not an installed candidate) — see
+the candidate verification summary above — while the physical power
 plug/unplug transition and audible power-cue verification have **not**
 been performed yet.
 

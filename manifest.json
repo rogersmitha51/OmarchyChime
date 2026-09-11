@@ -4,7 +4,7 @@
   "name": "Omarchy Chime",
   "version": "0.3.0",
   "author": "Omarchy",
-  "description": "Desktop-sounds 0.3.0 candidate: window open/close, workspace switches, volume up/down, power connect/disconnect, and agent needs-input cues, mute, volume, and previews.",
+  "description": "Desktop-sounds 0.3.0 candidate: window open/close, workspace switches, volume up/down, power connect/disconnect, and universal notification cues (one per newly accepted non-suppressed notification), mute, volume, and previews.",
   "kinds": [
     "service"
   ],

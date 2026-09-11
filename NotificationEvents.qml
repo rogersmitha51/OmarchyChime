@@ -1,11 +1,11 @@
-// Notification event adapter: turns a supported agent-input notification
-// into the single agentNeedsInput event.
+// Notification event adapter: turns every newly accepted notification into
+// the single notificationReceived event.
 //
 // This component is deliberately dumb about audio: it reports the
-// agent-input event even while the chime's own audio is muted or disabled,
+// notification event even while the chime's own audio is muted or disabled,
 // so the controller can decide what to play. `active` means the host wants
 // the observer running — the host binds it to safety && settings ready &&
-// enabled && agentInputEnabled. The observer itself is a passive D-Bus
+// enabled && notificationsEnabled. The observer itself is a passive D-Bus
 // monitor (notification_observer.py) that never owns the notification
 // service and never sends after becoming a monitor.
 //
@@ -38,8 +38,9 @@ Item {
 
     readonly property bool ready: root._ready
 
-    // Emitted for exactly the one supported event. Never emitted for stale
-    // reports, suppressed notifications, or equal-ID replies.
+    // Emitted for every freshly accepted, non-suppressed notification. Never
+    // emitted for stale reports, suppressed notifications, or equal-ID
+    // replies.
     signal eventOccurred(string eventName)
 
     // Transient observer state. Deliberately not persisted: a QML reload
@@ -211,7 +212,7 @@ Item {
             // Events additionally require a completed handshake.
             if (!root._ready)
                 return;
-            if (obj.event !== "agentNeedsInput") {
+            if (obj.event !== "notificationReceived") {
                 root._failClosed("unknown-protocol");
                 return;
             }
@@ -225,7 +226,7 @@ Item {
             var age = Date.now() - obj.timeMs;
             if (age < 0 || age > 250)
                 return;
-            root.eventOccurred("agentNeedsInput");
+            root.eventOccurred("notificationReceived");
         } else if (obj.type === "error") {
             var code = String(obj.code || "");
             if (!root._isFixedErrorToken(code)) {

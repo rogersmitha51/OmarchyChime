@@ -4,7 +4,7 @@
     "pluginId": "nick.chime",
     "version": "0.3.0",
     "status": "0.3.0 candidate (unreleased) on top of published 0.2.0; source uncommitted/unpushed, not a published release",
-    "description": "Independent desktop-sounds 0.3.0 candidate on top of published 0.2.0. Adds volume up/down and power connect/disconnect cues from the default PipeWire sink and UPower. Reads original DND, lock, and idle state; passively observes the session notification bus for the supported agent-input contract; owns no notification service, popup, history, or UI.",
+    "description": "Independent desktop-sounds 0.3.0 candidate on top of published 0.2.0. Adds volume up/down and power connect/disconnect cues from the default PipeWire sink and UPower, plus a universal notification cue: every newly accepted non-suppressed session notification emits notificationReceived and plays one cue, while updates/replacements and suppressed notifications stay silent. Reads original DND, lock, and idle state; passively observes the session notification bus; owns no notification service, popup, history, or UI — Omarchy remains the notification owner.",
     "referenceImplementation": "Omarchy shell plugin conventions and gobijan.ui-sounds desktop-event filters; no notification implementation retained."
   },
   "runtimeBaseline": {
@@ -34,7 +34,7 @@
       "ChimeController.qml (audio/settings)",
       "DesktopEvents.qml (window/workspace adapter)",
       "SystemEvents.qml (volume/power adapter)",
-      "NotificationEvents.qml (passive agent-input observer adapter)",
+      "NotificationEvents.qml (universal notification observer adapter)",
       "SystemLogic.js (volume/power event policy)",
       "notification_observer.py (session D-Bus monitor child)"
     ]
@@ -44,8 +44,8 @@
     "overlapBlocked": "pluginRegistry.isEnabled('gobijan.ui-sounds') === true; unknown registry or unknown state => blocked",
     "desktopReady": "adapter.ready passed through as DesktopEvents.ready",
     "systemReady": "SystemEvents.ready passed through; OR of volumeReady (default PipeWire sink baseline) and powerReady (UPower on-battery baseline); a missing backend keeps that source unready",
-    "agentInputReady": "observer.ready passed through as NotificationEvents.ready",
-    "observerActive": "safetyReady && controller.settingsReady && controller.enabled && controller.agentInputEnabled; independent of desktop activation, ui-sounds overlap, and desktop adapter readiness",
+    "notificationReady": "observer.ready passed through as NotificationEvents.ready",
+    "observerActive": "safetyReady && controller.settingsReady && controller.enabled && controller.notificationsEnabled; independent of desktop activation, ui-sounds overlap, and desktop adapter readiness",
     "ipcTarget": "chime",
     "ipcCommands": [
       "status",
@@ -53,7 +53,7 @@
       "unmute",
       "volume <0-1>",
       "desktop on|off",
-      "agentInput on|off",
+      "notifications on|off",
       "preview <eventName>",
       "help"
     ]
@@ -76,7 +76,7 @@
         "powerConnected": "power-plug.oga",
         "powerDisconnected": "power-unplug.oga"
       },
-      "note": "Stock sound-theme-freedesktop files provided by the host desktop, not shipped by this plugin; the agent-needs-input cue is the only local asset."
+      "note": "Stock sound-theme-freedesktop files provided by the host desktop, not shipped by this plugin; the notification cue is the only local asset. The asset file and provenance are kept from alpha 2 (originally the agent-needs-input cue); only its semantic role changed — it now cues every newly accepted non-suppressed notification via notificationReceived."
     }
   },
   "license": {
@@ -92,14 +92,14 @@
       "sourceGatesCompleted": [
         "omarchy plugin validate .",
         "qmllint -I /usr/lib/qt6/qml -W 0: all product QML/JS and service-safety.qml passed",
-        "node --test tests/controller.test.mjs tests/desktop.test.mjs tests/system.test.mjs: 38 tests passed",
-        "python -m unittest discover -s tests -p observer_test.py: 36 tests passed"
+        "node --test tests/controller.test.mjs tests/desktop.test.mjs tests/system.test.mjs: 44 tests passed",
+        "python -m unittest discover -s tests -p observer_test.py: 35 tests passed"
       ],
       "runtime": [
         "Isolated service harness passed: exercised the service-state safety gating and playback rules of the real product service with injected DND/lock/idle objects.",
         "Live volume probe passed: a source-loaded SystemEvents.qml adapter attached to the live default PipeWire sink observed output volume 0.65→0.66 emit event ID volumeUp and 0.66→0.65 emit volumeDown; wpctl get-volume confirmed the output volume restored to 0.65. The candidate was not installed into the shell, and the probe did not invoke ChimeController, play or audibly verify a cue, or change the plugin volume."
       ],
-      "issue2Race": "Issue #2 fix is source-level only in this candidate; no live redeployment or user confirmation has occurred, and the orchestrator performs those. The earlier busy-only fix was incomplete: the next workspace switch commonly arrives after the previous cue's child process exits and during the post-exit cooldown, and both transitions share event name workspaceSwitched, so a distinct-event-name cooldown policy still dropped the repeat. The completed fix exempts automatic non-agent desktop and volume/power cues from the post-exit cooldown entirely (their source state machines already deduplicate non-transitions, and the controller preempts a running voice); the cooldown still governs agent-input cues and previews.",
+      "issue2Race": "Issue #2 fix is source-level only in this candidate; no live redeployment or user confirmation has occurred, and the orchestrator performs those. The earlier busy-only fix was incomplete: the next workspace switch commonly arrives after the previous cue's child process exits and during the post-exit cooldown, and both transitions share event name workspaceSwitched, so a distinct-event-name cooldown policy still dropped the repeat. The completed fix exempts automatic non-notification desktop and volume/power cues from the post-exit cooldown entirely (their source state machines already deduplicate non-transitions, and the controller preempts a running voice); the cooldown still governs notification cues and previews.",
       "notYetPerformed": [
         "Physical power plug/unplug transition (UPower on-battery change) and audible verification of the power cue: not yet performed.",
         "Physical multi-monitor audibility: not reconfirmed for this candidate; prior coverage was deterministic tests only.",
@@ -135,6 +135,6 @@
         ]
       }
     },
-    "limitations": "For the 0.3.0 candidate, physical power plug/unplug and audible power-cue verification are not yet performed, and the issue #2 rapid-workspace-switch race fix has not been re-tested live: it is verified at source/policy level only, with no live redeployment or user confirmation. Physical audibility was confirmed historically only for the user's native ask, not for multi-monitor scenarios; multi-monitor coverage is deterministic tests only. Lock/idle transitions were simulated in the isolated QML harness, not physical lock/unlock. The real desktop notification owner was not changed by the private-bus owner-change fixture. Issue #4 approved ambiguous equal IDs as silent; agent-completed/generic notifications and a bar widget remain out of scope."
+    "limitations": "For the 0.3.0 candidate, physical power plug/unplug and audible power-cue verification are not yet performed, and the issue #2 rapid-workspace-switch race fix has not been re-tested live: it is verified at source/policy level only, with no live redeployment or user confirmation. Physical audibility was confirmed historically only for the user's native ask, not for multi-monitor scenarios; multi-monitor coverage is deterministic tests only. Lock/idle transitions were simulated in the isolated QML harness, not physical lock/unlock. The real desktop notification owner was not changed by the private-bus owner-change fixture. Issue #4 approved ambiguous equal-ID replies as silent (genuine updates/replacements never re-cue); a bar widget remains out of scope. The notification cue is universal: every newly accepted non-suppressed notification cues, so there is no app- or content-based classification scope."
   }
 }

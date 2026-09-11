@@ -7,7 +7,7 @@
 // the FileView/Process lifecycle and calls into these functions for parsing,
 // validation, and playback policy.
 
-var EVENT_IDS = ["windowOpened", "windowClosed", "workspaceSwitched", "agentNeedsInput", "volumeUp", "volumeDown", "powerConnected", "powerDisconnected"]
+var EVENT_IDS = ["windowOpened", "windowClosed", "workspaceSwitched", "notificationReceived", "volumeUp", "volumeDown", "powerConnected", "powerDisconnected"]
 
 // The four system events: volume and power-state cues driven by the session
 // bus, gated by the caller with the system adapter's readiness.
@@ -15,11 +15,11 @@ var SYSTEM_EVENT_IDS = ["volumeUp", "volumeDown", "powerConnected", "powerDiscon
 
 var ASSET_DIR = "/usr/share/sounds/freedesktop/stereo/"
 
-// The agent-input cue is a local plugin asset; ChimeController resolves the
+// The notification cue is a local plugin asset; ChimeController resolves the
 // relative path through Qt.resolvedUrl (decoded file URL) so playback never
 // depends on the host shell's working directory. Desktop and system events
 // keep the stock freedesktop sound theme.
-var AGENT_ASSET = "assets/agent-needs-input.wav"
+var NOTIFICATION_ASSET = "assets/agent-needs-input.wav"
 
 var ASSET_NAMES = {
   windowOpened: ASSET_DIR + "device-added.oga",
@@ -29,17 +29,18 @@ var ASSET_NAMES = {
   volumeDown: ASSET_DIR + "audio-volume-change.oga",
   powerConnected: ASSET_DIR + "power-plug.oga",
   powerDisconnected: ASSET_DIR + "power-unplug.oga",
-  agentNeedsInput: AGENT_ASSET
+  notificationReceived: NOTIFICATION_ASSET
 }
 
 var DEFAULT_SETTINGS = {
   enabled: true,
   volume: 0.35,
   desktopEnabled: false,
-  agentInputEnabled: false
+  notificationsEnabled: false
 }
 
-var SETTINGS_VERSION = 2
+var SETTINGS_VERSION = 3
+var V2_SETTINGS_VERSION = 2
 var LEGACY_SETTINGS_VERSION = 1
 var VOLUME_MIN = 0
 var VOLUME_MAX = 1
@@ -50,7 +51,7 @@ function defaults() {
     enabled: DEFAULT_SETTINGS.enabled,
     volume: DEFAULT_SETTINGS.volume,
     desktopEnabled: DEFAULT_SETTINGS.desktopEnabled,
-    agentInputEnabled: DEFAULT_SETTINGS.agentInputEnabled
+    notificationsEnabled: DEFAULT_SETTINGS.notificationsEnabled
   }
 }
 
@@ -58,13 +59,13 @@ function isValidEvent(name) {
   return EVENT_IDS.indexOf(String(name || "")) !== -1
 }
 
-// The agent-input event is the only event whose cue is a local plugin
+// The notification event is the only event whose cue is a local plugin
 // asset; every other event is a desktop event from the freedesktop theme.
 // This classification also drives event-specific cancellation in the
 // controller: desktop gate changes cut only desktop cues and the
-// agent-input switch cuts only agent-input cues.
-function isAgentEvent(name) {
-  return String(name || "") === "agentNeedsInput"
+// notifications switch cuts only notification cues.
+function isNotificationEvent(name) {
+  return String(name || "") === "notificationReceived"
 }
 
 function isSystemEvent(name) {
@@ -83,17 +84,19 @@ function playerCommand(asset, volume) {
   return ["/usr/bin/pw-play", "--volume", String(volume), String(asset)]
 }
 
-// Strict parse of the settings file. The complete v2 schema is
-// {version: 2, enabled: boolean, volume: finite number in [0, 1],
-// desktopEnabled: boolean, agentInputEnabled: boolean}. A file missing any
-// key, or with any invalid field, is rejected as a whole, so a malformed or
-// incomplete reload can never partially apply — mute in particular must
+// Strict parse of the settings file. The complete v3 schema is
+// {version: 3, enabled: boolean, volume: finite number in [0, 1],
+// desktopEnabled: boolean, notificationsEnabled: boolean}. A file missing
+// any key, or with any invalid field, is rejected as a whole, so a malformed
+// or incomplete reload can never partially apply — mute in particular must
 // survive intact. Unknown keys are ignored for forward compatibility.
 //
-// A complete v1 file ({version: 1, enabled, volume, desktopEnabled}) is
-// accepted and migrated with the new per-event switch off, preserving every
-// existing field. v1 files with missing or invalid fields are rejected like
-// any other malformed file.
+// A complete v2 file ({version: 2, enabled, volume, desktopEnabled,
+// agentInputEnabled}) is accepted and migrated with the old switch carried
+// over verbatim into notificationsEnabled. A complete v1 file ({version: 1,
+// enabled, volume, desktopEnabled}) is accepted and migrated with the new
+// notifications switch off, preserving every existing field. v1/v2 files
+// with missing or invalid fields are rejected like any other malformed file.
 function parseSettings(text) {
   var parsed
   try {
@@ -119,7 +122,27 @@ function parseSettings(text) {
         enabled: parsed.enabled,
         volume: parsed.volume,
         desktopEnabled: parsed.desktopEnabled,
-        agentInputEnabled: false
+        notificationsEnabled: false
+      }
+    }
+  }
+  if (parsed.version === V2_SETTINGS_VERSION) {
+    if (typeof parsed.enabled !== "boolean")
+      return { ok: false, error: "enabled must be a boolean" }
+    if (typeof parsed.volume !== "number" || !isFinite(parsed.volume)
+        || parsed.volume < VOLUME_MIN || parsed.volume > VOLUME_MAX)
+      return { ok: false, error: "volume must be a finite number between 0 and 1" }
+    if (typeof parsed.desktopEnabled !== "boolean")
+      return { ok: false, error: "desktopEnabled must be a boolean" }
+    if (typeof parsed.agentInputEnabled !== "boolean")
+      return { ok: false, error: "agentInputEnabled must be a boolean" }
+    return {
+      ok: true,
+      settings: {
+        enabled: parsed.enabled,
+        volume: parsed.volume,
+        desktopEnabled: parsed.desktopEnabled,
+        notificationsEnabled: parsed.agentInputEnabled
       }
     }
   }
@@ -132,8 +155,8 @@ function parseSettings(text) {
     return { ok: false, error: "volume must be a finite number between 0 and 1" }
   if (typeof parsed.desktopEnabled !== "boolean")
     return { ok: false, error: "desktopEnabled must be a boolean" }
-  if (typeof parsed.agentInputEnabled !== "boolean")
-    return { ok: false, error: "agentInputEnabled must be a boolean" }
+  if (typeof parsed.notificationsEnabled !== "boolean")
+    return { ok: false, error: "notificationsEnabled must be a boolean" }
 
   return {
     ok: true,
@@ -141,7 +164,7 @@ function parseSettings(text) {
       enabled: parsed.enabled,
       volume: parsed.volume,
       desktopEnabled: parsed.desktopEnabled,
-      agentInputEnabled: parsed.agentInputEnabled
+      notificationsEnabled: parsed.notificationsEnabled
     }
   }
 }
@@ -152,7 +175,7 @@ function serializeSettings(settings) {
     enabled: !!settings.enabled,
     volume: settings.volume,
     desktopEnabled: !!settings.desktopEnabled,
-    agentInputEnabled: !!settings.agentInputEnabled
+    notificationsEnabled: !!settings.notificationsEnabled
   }, null, 2) + "\n"
 }
 
@@ -175,13 +198,13 @@ function decideSettings(current, result) {
 // adapter ready (the caller passes whichever source readiness governs the
 // event kind — desktop adapter readiness for desktop events, system adapter
 // readiness for system events), no held playback claim (same-tick
-// overlapping requests are rejected). Automatic non-agent events ignore the
-// post-exit cooldown entirely: the desktop/system source state machines
-// already deduplicate non-transitions, and the controller preempts while a
-// voice is running, so a rapid repeated event (e.g. a second
+// overlapping requests are rejected). Automatic non-notification events
+// ignore the post-exit cooldown entirely: the desktop/system source state
+// machines already deduplicate non-transitions, and the controller preempts
+// while a voice is running, so a rapid repeated event (e.g. a second
 // workspaceSwitched arriving after the previous child exited but during the
 // cooldown window) must stay eligible. Desktop-style gates never govern the
-// agent-input cue, which keeps its own cooldown gate.
+// notification cue, which keeps its own cooldown gate.
 function automaticBlockedReason(state) {
   if (!state || !state.settingsReady) return "settings not ready"
   if (!state.enabled) return "muted"
@@ -193,20 +216,20 @@ function automaticBlockedReason(state) {
   return ""
 }
 
-// First blocking reason for agent-input automatic playback, or "" when
-// every gate passes. The agent-input gate deliberately does NOT depend on
-// desktop activation, ui-sounds overlap, or desktop adapter readiness: an
-// agent asking for input is relevant even when desktop sounds are off. It
-// still shares the master switch, session safety, and the single voice with
+// First blocking reason for notification automatic playback, or "" when
+// every gate passes. The notification gate deliberately does NOT depend on
+// desktop activation, ui-sounds overlap, or desktop adapter readiness: a
+// notification is relevant even when desktop sounds are off. It still
+// shares the master switch, session safety, and the single voice with
 // desktop playback, and it keeps the post-exit cooldown as its own gate —
-// agent input remains defended against rapid repeats, unlike automatic
-// non-agent events which ignore the cooldown entirely.
-function agentInputBlockedReason(state) {
+// notifications remain defended against rapid repeats, unlike automatic
+// non-notification events which ignore the cooldown entirely.
+function notificationBlockedReason(state) {
   if (!state || !state.settingsReady) return "settings not ready"
   if (!state.enabled) return "muted"
-  if (!state.agentInputEnabled) return "agent input sounds disabled"
+  if (!state.notificationsEnabled) return "notification sounds disabled"
   if (!state.safetyReady) return "not safe"
-  if (!state.agentInputReady) return "agent input not ready"
+  if (!state.notificationReady) return "notification source not ready"
   if (state.cooldownActive) return "cooldown"
   if (state.playing) return "busy"
   return ""

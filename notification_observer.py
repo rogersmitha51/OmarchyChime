@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Passive typed D-Bus observer for the Omarchy Chime agent-input event.
+"""Passive typed D-Bus observer for the Omarchy Chime notification cue.
 
 Runs as a child of the Quickshell plugin (NotificationEvents.qml). It
 eavesdrops on the session bus with org.freedesktop.DBus.Monitoring
@@ -7,15 +7,16 @@ BecomeMonitor, using narrow match rules for org.freedesktop.Notifications
 Notify calls (well-known and unique destinations) and the notification
 server's successful/error replies. Each Notify call is correlated with its
 reply by (caller unique name, serial) through a bounded, expiring pending
-table; a normalized agent-input event is emitted only for a fresh accepted
-notification that matches the supported agent contract.
+table; a notificationReceived event is emitted only for a fresh accepted
+notification — a successful reply confirms the server actually accepted
+it, and the notification's contents (app, title, body) are never consulted.
 
-Privacy: only the classification inputs (app name, body, suppression
-hint) are inspected; nothing is logged or persisted. The output protocol
-is newline-delimited JSON on stdout:
+Privacy: notification contents are not used; only the suppress-sound hint
+is classified. Nothing is logged or persisted. The output protocol is
+newline-delimited JSON on stdout:
 
   {"type":"ready"}
-  {"type":"event","event":"agentNeedsInput","timeMs":<epoch-ms>}
+  {"type":"event","event":"notificationReceived","timeMs":<epoch-ms>}
   {"type":"error","code":<fixed-token>}
 
 The observer never owns org.freedesktop.Notifications, never sends
@@ -50,11 +51,8 @@ NOTIFY_MEMBER = "Notify"
 NOTIFY_SIGNATURE = "susssasa{sv}i"
 REPLY_SIGNATURE = "u"
 
-# Supported agent contract (version-sensitive, exact match). App labels are
-# classification hints, not authenticated identity; session titles are never
-# used to classify.
-AGENT_APP = "Oh My Pi"
-AGENT_BODY = "Waiting for input"
+# Notification contents (app, title, body) are never used to classify; only
+# the typed suppress-sound hint is.
 SUPPRESS_HINT = "suppress-sound"
 
 # Bounded pending correlation table: entries expire after this many seconds
@@ -128,7 +126,7 @@ class Observer:
     def _emit_event(self):
         self.emit({
             "type": "event",
-            "event": "agentNeedsInput",
+            "event": "notificationReceived",
             "timeMs": int(time.time() * 1000),
         })
 
@@ -244,11 +242,10 @@ class Observer:
         serial = message.get_serial()
         if not sender or not serial:
             return
-        candidate = self.classify(args[0], args[4], args[6])
-        if not candidate:
-            # Not an eligible agent-input candidate (wrong app/body, or a
-            # suppression hint that fails closed): never record it, so a
-            # later reply can never turn it into an event.
+        if not self.isNotificationEvent(args[6]):
+            # Suppressed (or a malformed suppression hint that fails closed):
+            # never record it, so a later reply can never turn it into an
+            # event.
             return
         self._store_pending(sender, serial, int(args[1]))
 
@@ -325,19 +322,17 @@ class Observer:
 
     # -- classification ----------------------------------------------------
 
-    def classify(self, app, body, hints):
-        """True when the call is an eligible agent-input candidate.
+    def isNotificationEvent(self, hints):
+        """True for a well-formed, non-suppressed Notify call.
 
-        Exact app/body match against the supported contract; a boolean
-        true suppress-sound hint (or any malformed suppression hint type)
-        fails closed to not-candidate. Unknown hints are ignored.
+        Notification contents are never used to classify: any well-formed
+        canonical Notify call is eligible regardless of app title or body. A
+        boolean true suppress-sound hint (or any malformed suppression hint
+        type) fails closed to not-eligible. Unknown hints are ignored. A
+        non-dict hints value is itself malformed and fails closed.
         """
-        if app != AGENT_APP:
-            return False
-        if body != AGENT_BODY:
-            return False
-        if hints is not None:
-            try:
+        try:
+            if hints is not None:
                 if SUPPRESS_HINT in hints:
                     value = hints[SUPPRESS_HINT]
                     if isinstance(value, (bool, dbus.Boolean)):
@@ -346,8 +341,8 @@ class Observer:
                     else:
                         # Malformed suppression hint: fail closed.
                         return False
-            except Exception:
-                return False
+        except Exception:
+            return False
         return True
 
 

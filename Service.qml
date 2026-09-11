@@ -1,10 +1,10 @@
 // Omarchy Chime — desktop event sounds, system volume/power cues, and
-// agent-input cues.
+// notification cues.
 //
 // Independent service plugin (nick.chime). This file is a small composition
 // root only: it wires the ChimeController (audio/settings), DesktopEvents
 // (window/workspace adapter), SystemEvents (volume/power adapter), and
-// NotificationEvents (passive agent-input observer) slices together,
+// NotificationEvents (passive notification observer) slices together,
 // resolves the original DND/lock/idle services for conservative safety
 // gating, and exposes the `chime` IPC surface. It owns no notification
 // daemon, popup, history, or DND state — the built-in omarchy.notifications
@@ -32,7 +32,7 @@ Item {
         desktopReady: adapter.ready
         systemReady: systemAdapter.ready
         overlapBlocked: service.overlapBlocked
-        agentInputReady: observer.ready
+        notificationReady: observer.ready
     }
 
     DesktopEvents {
@@ -59,12 +59,12 @@ Item {
     NotificationEvents {
         id: observer
         // The observer runs only while the session is safe AND the controller
-        // has decided its settings, is unmuted, and has agent input enabled.
-        // It never depends on desktop activation, ui-sounds overlap, or desktop
-        // adapter readiness: an agent asking for input is relevant even when
-        // desktop sounds are off. `active` is the host's decision; the observer
-        // owns its own readiness settling and process lifecycle.
-        active: service.safetyReady && controller.settingsReady && controller.enabled && controller.agentInputEnabled
+        // has decided its settings, is unmuted, and has notifications
+        // enabled. It never depends on desktop activation, ui-sounds overlap,
+        // or desktop adapter readiness: a notification is relevant even when
+        // desktop sounds are off. `active` is the host's decision; the
+        // observer owns its own readiness settling and process lifecycle.
+        active: service.safetyReady && controller.settingsReady && controller.enabled && controller.notificationsEnabled
         onEventOccurred: function (eventName) {
             controller.playEvent(eventName);
         }
@@ -261,11 +261,11 @@ Item {
             return controller.setDesktopEnabled(v === "on");
         }
 
-        function agentInput(value: string): string {
+        function notifications(value: string): string {
             var v = String(value || "").trim().toLowerCase();
             if (v !== "on" && v !== "off")
-                return "error: agentInput must be on or off";
-            return controller.setAgentInputEnabled(v === "on");
+                return "error: notifications must be on or off";
+            return controller.setNotificationsEnabled(v === "on");
         }
 
         function preview(eventName: string): string {
@@ -276,7 +276,7 @@ Item {
         }
 
         function help(): string {
-            return "chime commands: status, mute, unmute, volume <0-1>, desktop on|off, agentInput on|off, preview <eventName>, help";
+            return "chime commands: status, mute, unmute, volume <0-1>, desktop on|off, notifications on|off, preview <eventName>, help";
         }
     }
 
