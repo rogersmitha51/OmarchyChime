@@ -7,23 +7,32 @@
 // the FileView/Process lifecycle and calls into these functions for parsing,
 // validation, and playback policy.
 
-var EVENT_IDS = ["windowOpened", "windowClosed", "workspaceSwitched"]
+var EVENT_IDS = ["windowOpened", "windowClosed", "workspaceSwitched", "agentNeedsInput"]
 
 var ASSET_DIR = "/usr/share/sounds/freedesktop/stereo/"
 
+// The agent-input cue is a local plugin asset; ChimeController resolves the
+// relative path through Qt.resolvedUrl (decoded file URL) so playback never
+// depends on the host shell's working directory. Desktop events keep the
+// stock freedesktop sound theme.
+var AGENT_ASSET = "assets/agent-needs-input.wav"
+
 var ASSET_NAMES = {
-  windowOpened: "device-added.oga",
-  windowClosed: "device-removed.oga",
-  workspaceSwitched: "audio-volume-change.oga"
+  windowOpened: ASSET_DIR + "device-added.oga",
+  windowClosed: ASSET_DIR + "device-removed.oga",
+  workspaceSwitched: ASSET_DIR + "audio-volume-change.oga",
+  agentNeedsInput: AGENT_ASSET
 }
 
 var DEFAULT_SETTINGS = {
   enabled: true,
   volume: 0.35,
-  desktopEnabled: false
+  desktopEnabled: false,
+  agentInputEnabled: false
 }
 
-var SETTINGS_VERSION = 1
+var SETTINGS_VERSION = 2
+var LEGACY_SETTINGS_VERSION = 1
 var VOLUME_MIN = 0
 var VOLUME_MAX = 1
 var COOLDOWN_MS = 250
@@ -32,7 +41,8 @@ function defaults() {
   return {
     enabled: DEFAULT_SETTINGS.enabled,
     volume: DEFAULT_SETTINGS.volume,
-    desktopEnabled: DEFAULT_SETTINGS.desktopEnabled
+    desktopEnabled: DEFAULT_SETTINGS.desktopEnabled,
+    agentInputEnabled: DEFAULT_SETTINGS.agentInputEnabled
   }
 }
 
@@ -40,9 +50,18 @@ function isValidEvent(name) {
   return EVENT_IDS.indexOf(String(name || "")) !== -1
 }
 
+// The agent-input event is the only event whose cue is a local plugin
+// asset; every other event is a desktop event from the freedesktop theme.
+// This classification also drives event-specific cancellation in the
+// controller: desktop gate changes cut only desktop cues and the
+// agent-input switch cuts only agent-input cues.
+function isAgentEvent(name) {
+  return String(name || "") === "agentNeedsInput"
+}
+
 function assetPath(eventName) {
   var name = ASSET_NAMES[eventName]
-  return name ? ASSET_DIR + name : ""
+  return name ? name : ""
 }
 
 // The single playback voice: one pw-play invocation. No shell, no quoting —
@@ -52,12 +71,17 @@ function playerCommand(asset, volume) {
   return ["/usr/bin/pw-play", "--volume", String(volume), String(asset)]
 }
 
-// Strict parse of the settings file. The complete schema is
-// {version: 1, enabled: boolean, volume: finite number in [0, 1],
-// desktopEnabled: boolean}. A file missing any key, or with any invalid
-// field, is rejected as a whole, so a malformed or incomplete reload can
-// never partially apply — mute in particular must survive intact. Unknown
-// keys are ignored for forward compatibility.
+// Strict parse of the settings file. The complete v2 schema is
+// {version: 2, enabled: boolean, volume: finite number in [0, 1],
+// desktopEnabled: boolean, agentInputEnabled: boolean}. A file missing any
+// key, or with any invalid field, is rejected as a whole, so a malformed or
+// incomplete reload can never partially apply — mute in particular must
+// survive intact. Unknown keys are ignored for forward compatibility.
+//
+// A complete v1 file ({version: 1, enabled, volume, desktopEnabled}) is
+// accepted and migrated with the new per-event switch off, preserving every
+// existing field. v1 files with missing or invalid fields are rejected like
+// any other malformed file.
 function parseSettings(text) {
   var parsed
   try {
@@ -69,6 +93,24 @@ function parseSettings(text) {
     return { ok: false, error: "settings must be a JSON object" }
   if (parsed.version === undefined)
     return { ok: false, error: "settings version is required" }
+  if (parsed.version === LEGACY_SETTINGS_VERSION) {
+    if (typeof parsed.enabled !== "boolean")
+      return { ok: false, error: "enabled must be a boolean" }
+    if (typeof parsed.volume !== "number" || !isFinite(parsed.volume)
+        || parsed.volume < VOLUME_MIN || parsed.volume > VOLUME_MAX)
+      return { ok: false, error: "volume must be a finite number between 0 and 1" }
+    if (typeof parsed.desktopEnabled !== "boolean")
+      return { ok: false, error: "desktopEnabled must be a boolean" }
+    return {
+      ok: true,
+      settings: {
+        enabled: parsed.enabled,
+        volume: parsed.volume,
+        desktopEnabled: parsed.desktopEnabled,
+        agentInputEnabled: false
+      }
+    }
+  }
   if (parsed.version !== SETTINGS_VERSION)
     return { ok: false, error: "unsupported settings version: " + parsed.version }
   if (typeof parsed.enabled !== "boolean")
@@ -78,13 +120,16 @@ function parseSettings(text) {
     return { ok: false, error: "volume must be a finite number between 0 and 1" }
   if (typeof parsed.desktopEnabled !== "boolean")
     return { ok: false, error: "desktopEnabled must be a boolean" }
+  if (typeof parsed.agentInputEnabled !== "boolean")
+    return { ok: false, error: "agentInputEnabled must be a boolean" }
 
   return {
     ok: true,
     settings: {
       enabled: parsed.enabled,
       volume: parsed.volume,
-      desktopEnabled: parsed.desktopEnabled
+      desktopEnabled: parsed.desktopEnabled,
+      agentInputEnabled: parsed.agentInputEnabled
     }
   }
 }
@@ -94,7 +139,8 @@ function serializeSettings(settings) {
     version: SETTINGS_VERSION,
     enabled: !!settings.enabled,
     volume: settings.volume,
-    desktopEnabled: !!settings.desktopEnabled
+    desktopEnabled: !!settings.desktopEnabled,
+    agentInputEnabled: !!settings.agentInputEnabled
   }, null, 2) + "\n"
 }
 
@@ -111,11 +157,11 @@ function decideSettings(current, result) {
   return { settings: defaults(), source: "defaults", error: result.error }
 }
 
-// First blocking reason for automatic playback, or "" when every gate
-// passes. Order matters: settings decided, master on, desktop sounds
+// First blocking reason for desktop automatic playback, or "" when every
+// gate passes. Order matters: settings decided, master on, desktop sounds
 // explicitly activated, no overlap, safe session, desktop adapter ready,
 // cooldown elapsed, no held playback claim (same-tick overlapping requests
-// are rejected).
+// are rejected). Desktop gates never govern the agent-input cue.
 function automaticBlockedReason(state) {
   if (!state || !state.settingsReady) return "settings not ready"
   if (!state.enabled) return "muted"
@@ -123,6 +169,23 @@ function automaticBlockedReason(state) {
   if (state.overlapBlocked) return "blocked by ui-sounds"
   if (!state.safetyReady) return "not safe"
   if (!state.desktopReady) return "desktop not ready"
+  if (state.cooldownActive) return "cooldown"
+  if (state.playing) return "busy"
+  return ""
+}
+
+// First blocking reason for agent-input automatic playback, or "" when
+// every gate passes. The agent-input gate deliberately does NOT depend on
+// desktop activation, ui-sounds overlap, or desktop adapter readiness: an
+// agent asking for input is relevant even when desktop sounds are off. It
+// still shares the master switch, session safety, the single voice, and the
+// cooldown with desktop playback.
+function agentInputBlockedReason(state) {
+  if (!state || !state.settingsReady) return "settings not ready"
+  if (!state.enabled) return "muted"
+  if (!state.agentInputEnabled) return "agent input sounds disabled"
+  if (!state.safetyReady) return "not safe"
+  if (!state.agentInputReady) return "agent input not ready"
   if (state.cooldownActive) return "cooldown"
   if (state.playing) return "busy"
   return ""
