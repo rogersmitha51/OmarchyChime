@@ -4,12 +4,23 @@
   "name": "Omarchy Chime",
   "version": "0.3.0",
   "author": "Omarchy",
-  "description": "Desktop-sounds 0.3.0 candidate: window open/close, workspace switches, volume up/down, power connect/disconnect, and universal notification cues (one per newly accepted non-suppressed notification), mute, volume, and previews.",
+  "description": "Desktop-sounds 0.3.0 candidate: window open/close, workspace switches, volume up/down, power connect/disconnect, and universal notification cues (one per newly accepted non-suppressed notification), per-event sound selection from the sound catalog, mute, volume, and previews.",
   "kinds": [
-    "service"
+    "service",
+    "panel",
+    "bar-widget"
   ],
   "keepLoaded": true,
   "entryPoints": {
-    "service": "Service.qml"
+    "service": "Service.qml",
+    "panel": "Settings.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Chime",
+    "description": "Chime sound status; left click opens the settings panel, right click toggles master mute",
+    "category": "Audio",
+    "allowMultiple": false,
+    "defaultSection": "right"
   }
 }

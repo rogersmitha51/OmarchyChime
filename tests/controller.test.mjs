@@ -3,14 +3,16 @@
 // is stripped and the library is evaluated in a vm context so no QML runtime
 // is needed.
 //
-// These defend observable contracts: the strict complete v3 settings schema
-// (version plus all four typed, bounded fields), v2 migration (every
-// existing field preserved, the old agentInputEnabled switch carried over
-// verbatim into notificationsEnabled), safe v1 migration (every existing
-// field preserved, the notifications switch off), invalid/incomplete reload
-// preservation (mute must survive a malformed file), the persisted-settings
-// roundtrip feeding playback eligibility, the generic notification event
-// naming with no agent-named aliases left in the public surface, and the two
+// These defend observable contracts: the strict complete v4 settings schema
+// (version plus all five typed, bounded fields, the sounds map requiring
+// every event mapped to a catalog sound id), v3 migration (every existing
+// field preserved, the sounds map seeded with the cues 0.3.0 played), v2
+// migration (agentInputEnabled carried over verbatim into
+// notificationsEnabled), safe v1 migration (notifications off), invalid
+// reload preservation (mute must survive a malformed file), the
+// persisted-settings roundtrip feeding playback eligibility, the generic
+// notification event naming with no agent-named aliases left in the public
+// surface, the per-event sound catalog and resolution helpers, and the two
 // independent automatic-playback gate policies consumed by
 // ChimeController.playEvent/playNotificationEvent. Preview gating and the
 // Process reservation/cooldown lifecycle are inline in ChimeController.qml
@@ -37,10 +39,10 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value))
 }
 
-// A complete v3 settings file; pass overrides to mutate or drop keys
+// A complete v4 settings file; pass overrides to mutate or drop keys
 // (undefined values are omitted by JSON.stringify).
 function file(overrides) {
-  return JSON.stringify({ version: 3, enabled: true, volume: 0.5, desktopEnabled: true, notificationsEnabled: true, ...overrides })
+  return JSON.stringify({ version: 4, enabled: true, volume: 0.5, desktopEnabled: true, notificationsEnabled: true, sounds: Logic.defaultEventSounds(), ...overrides })
 }
 
 // A complete v2 settings file (the agentInputEnabled schema).
@@ -55,17 +57,30 @@ function legacyFile(overrides) {
 
 // ---------------------------------------------------------------- settings
 
-test("parseSettings accepts a complete valid v3 file", () => {
-  const r = Logic.parseSettings(file({ enabled: false, volume: 0.2, desktopEnabled: true, notificationsEnabled: false }))
+
+test("parseSettings accepts a complete valid v4 file", () => {
+  const r = Logic.parseSettings(file({ enabled: false, volume: 0.2, desktopEnabled: true, notificationsEnabled: false, sounds: { ...Logic.defaultEventSounds(), windowOpened: "bell" } }))
   assert.equal(r.ok, true)
-  assert.deepEqual(plain(r.settings), { enabled: false, volume: 0.2, desktopEnabled: true, notificationsEnabled: false })
+  assert.deepEqual(plain(r.settings), { enabled: false, volume: 0.2, desktopEnabled: true, notificationsEnabled: false, sounds: { ...Logic.defaultEventSounds(), windowOpened: "bell" } })
 })
 
-test("parseSettings rejects incomplete v3 files: every key is required", () => {
-  for (const missing of ["version", "enabled", "volume", "desktopEnabled", "notificationsEnabled"]) {
+test("parseSettings rejects incomplete v4 files: every key is required", () => {
+  for (const missing of ["version", "enabled", "volume", "desktopEnabled", "notificationsEnabled", "sounds"]) {
     const r = Logic.parseSettings(file({ [missing]: undefined }))
     assert.equal(r.ok, false, missing + " must be required")
   }
+})
+
+test("parseSettings rejects invalid sounds maps", () => {
+  // A missing event, a stale sound id, a non-string value, and a non-object
+  // map each reject the whole file: sounds never partially apply.
+  assert.equal(Logic.parseSettings(file({ sounds: {} })).ok, false)
+  assert.equal(Logic.parseSettings(file({ sounds: { ...Logic.defaultEventSounds(), windowOpened: "power-plug" } })).ok, false)
+  assert.equal(Logic.parseSettings(file({ sounds: { ...Logic.defaultEventSounds(), volumeUp: 7 } })).ok, false)
+  assert.equal(Logic.parseSettings(file({ sounds: [] })).ok, false)
+  assert.equal(Logic.parseSettings(file({ sounds: null })).ok, false)
+  // A path traversal or absolute path is not a catalog id: rejected.
+  assert.equal(Logic.parseSettings(file({ sounds: { ...Logic.defaultEventSounds(), windowClosed: "/etc/passwd" } })).ok, false)
 })
 
 test("parseSettings rejects invalid types and out-of-range volume", () => {
@@ -79,7 +94,7 @@ test("parseSettings rejects invalid types and out-of-range volume", () => {
 })
 
 test("parseSettings rejects unsupported versions", () => {
-  assert.equal(Logic.parseSettings(file({ version: 4 })).ok, false)
+  assert.equal(Logic.parseSettings(file({ version: 5 })).ok, false)
   assert.equal(Logic.parseSettings(file({ version: 0 })).ok, false)
 })
 
@@ -93,15 +108,15 @@ test("parseSettings rejects malformed JSON and non-object roots", () => {
 test("parseSettings ignores unknown keys for forward compatibility", () => {
   const r = Logic.parseSettings(file({ future: "x" }))
   assert.equal(r.ok, true)
-  assert.deepEqual(plain(r.settings), { enabled: true, volume: 0.5, desktopEnabled: true, notificationsEnabled: true })
+  assert.deepEqual(plain(r.settings), plain({ enabled: true, volume: 0.5, desktopEnabled: true, notificationsEnabled: true, sounds: Logic.defaultEventSounds() }))
 })
 
-// An agentInputEnabled key inside a v3 file is an unknown key, ignored for
-// forward compatibility: the v3 schema no longer has that switch.
-test("parseSettings ignores a stray agentInputEnabled key in a v3 file", () => {
+// An agentInputEnabled key inside a v4 file is an unknown key, ignored for
+// forward compatibility: the v4 schema no longer has that switch.
+test("parseSettings ignores a stray agentInputEnabled key in a v4 file", () => {
   const r = Logic.parseSettings(file({ agentInputEnabled: false }))
   assert.equal(r.ok, true)
-  assert.deepEqual(plain(r.settings), { enabled: true, volume: 0.5, desktopEnabled: true, notificationsEnabled: true })
+  assert.deepEqual(plain(r.settings), plain({ enabled: true, volume: 0.5, desktopEnabled: true, notificationsEnabled: true, sounds: Logic.defaultEventSounds() }))
 })
 
 // ------------------------------------------------------------ v2 migration
@@ -109,13 +124,13 @@ test("parseSettings ignores a stray agentInputEnabled key in a v3 file", () => {
 test("complete v2 file migrates: every field preserved, agentInputEnabled carried over verbatim", () => {
   const r = Logic.parseSettings(v2File({ enabled: false, volume: 0.2, desktopEnabled: true, agentInputEnabled: true }))
   assert.equal(r.ok, true)
-  assert.deepEqual(plain(r.settings), { enabled: false, volume: 0.2, desktopEnabled: true, notificationsEnabled: true })
+  assert.deepEqual(plain(r.settings), plain({ enabled: false, volume: 0.2, desktopEnabled: true, notificationsEnabled: true, sounds: Logic.defaultEventSounds() }))
 })
 
 test("complete v2 file with the switch off migrates with notifications off", () => {
   const r = Logic.parseSettings(v2File({ agentInputEnabled: false }))
   assert.equal(r.ok, true)
-  assert.deepEqual(plain(r.settings), { enabled: true, volume: 0.5, desktopEnabled: true, notificationsEnabled: false })
+  assert.deepEqual(plain(r.settings), plain({ enabled: true, volume: 0.5, desktopEnabled: true, notificationsEnabled: false, sounds: Logic.defaultEventSounds() }))
 })
 
 test("incomplete v2 file is rejected like any malformed file", () => {
@@ -133,7 +148,7 @@ test("incomplete v2 file is rejected like any malformed file", () => {
 test("complete v1 file migrates: every field preserved, notifications off", () => {
   const r = Logic.parseSettings(legacyFile({ enabled: false, volume: 0.2, desktopEnabled: true }))
   assert.equal(r.ok, true)
-  assert.deepEqual(plain(r.settings), { enabled: false, volume: 0.2, desktopEnabled: true, notificationsEnabled: false })
+  assert.deepEqual(plain(r.settings), plain({ enabled: false, volume: 0.2, desktopEnabled: true, notificationsEnabled: false, sounds: Logic.defaultEventSounds() }))
 })
 
 test("incomplete v1 file is rejected like any malformed file", () => {
@@ -150,31 +165,31 @@ test("incomplete v1 file is rejected like any malformed file", () => {
 test("invalid or incomplete reload preserves decided settings, especially mute", () => {
   const current = {
     settingsReady: true,
-    settings: { enabled: false, volume: 0.2, desktopEnabled: true, notificationsEnabled: true }
+    settings: { enabled: false, volume: 0.2, desktopEnabled: true, notificationsEnabled: true, sounds: Logic.defaultEventSounds() }
   }
   // Malformed file: the decided mute survives.
   const malformed = Logic.decideSettings(current, { ok: false, error: "invalid JSON" })
   assert.equal(malformed.source, "preserved")
-  assert.deepEqual(plain(malformed.settings), current.settings)
-  // Incomplete v3 file rejected by the strict parser: same preservation.
-  const incomplete = Logic.parseSettings(file({ notificationsEnabled: undefined }))
+  assert.deepEqual(plain(malformed.settings), plain(current.settings))
+  // Incomplete v4 file rejected by the strict parser: same preservation.
+  const incomplete = Logic.parseSettings(file({ sounds: undefined }))
   assert.equal(incomplete.ok, false)
   const decision = Logic.decideSettings(current, incomplete)
   assert.equal(decision.source, "preserved")
-  assert.deepEqual(plain(decision.settings), current.settings)
+  assert.deepEqual(plain(decision.settings), plain(current.settings))
 })
 
 test("valid file is adopted over current settings", () => {
   const current = {
     settingsReady: true,
-    settings: { enabled: true, volume: 0.9, desktopEnabled: false, notificationsEnabled: true }
+    settings: { enabled: true, volume: 0.9, desktopEnabled: false, notificationsEnabled: true, sounds: Logic.defaultEventSounds() }
   }
   const decision = Logic.decideSettings(current, {
     ok: true,
-    settings: { enabled: false, volume: 0.1, desktopEnabled: true, notificationsEnabled: false }
+    settings: { enabled: false, volume: 0.1, desktopEnabled: true, notificationsEnabled: false, sounds: { ...Logic.defaultEventSounds(), workspaceSwitched: "bell" } }
   })
   assert.equal(decision.source, "file")
-  assert.deepEqual(plain(decision.settings), { enabled: false, volume: 0.1, desktopEnabled: true, notificationsEnabled: false })
+  assert.deepEqual(plain(decision.settings), plain({ enabled: false, volume: 0.1, desktopEnabled: true, notificationsEnabled: false, sounds: { ...Logic.defaultEventSounds(), workspaceSwitched: "bell" } }))
 })
 
 // ------------------------------------------------- playback eligibility
@@ -207,33 +222,62 @@ function notificationGates() {
 test("persisted settings round-trip and drive playback eligibility", () => {
   // A muted file survives serialize -> parse and keeps both automatic kinds
   // blocked.
-  const muted = { enabled: false, volume: 0.2, desktopEnabled: true, notificationsEnabled: true }
+  const muted = { enabled: false, volume: 0.2, desktopEnabled: true, notificationsEnabled: true, sounds: Logic.defaultEventSounds() }
   const parsed = Logic.parseSettings(Logic.serializeSettings(muted))
   assert.equal(parsed.ok, true)
-  assert.deepEqual(plain(parsed.settings), muted)
+  assert.deepEqual(plain(parsed.settings), plain(muted))
   assert.equal(Logic.automaticBlockedReason({ ...gates(), ...parsed.settings }), "muted")
   assert.equal(Logic.notificationBlockedReason({ ...notificationGates(), ...parsed.settings }), "muted")
 
   // An enabled file round-trips and passes every gate.
-  const on = { enabled: true, volume: 0.5, desktopEnabled: true, notificationsEnabled: true }
+  const on = { enabled: true, volume: 0.5, desktopEnabled: true, notificationsEnabled: true, sounds: Logic.defaultEventSounds() }
   const parsedOn = Logic.parseSettings(Logic.serializeSettings(on))
   assert.equal(parsedOn.ok, true)
-  assert.deepEqual(plain(parsedOn.settings), on)
+  assert.deepEqual(plain(parsedOn.settings), plain(on))
   assert.equal(Logic.automaticBlockedReason({ ...gates(), ...parsedOn.settings }), "")
   assert.equal(Logic.notificationBlockedReason({ ...notificationGates(), ...parsedOn.settings }), "")
 })
 
-test("serializeSettings always emits the complete v3 schema", () => {
-  const text = Logic.serializeSettings({ enabled: true, volume: 0.5, desktopEnabled: false, notificationsEnabled: true })
+test("persisted per-event sounds survive serialize -> parse and drive resolution", () => {
+  const custom = { enabled: true, volume: 0.5, desktopEnabled: true, notificationsEnabled: true, sounds: { ...Logic.defaultEventSounds(), notificationReceived: "bell", windowOpened: "complete" } }
+  const parsed = Logic.parseSettings(Logic.serializeSettings(custom))
+  assert.equal(parsed.ok, true)
+  assert.deepEqual(plain(parsed.settings.sounds), plain(custom.sounds))
+  // The customized assignments are what playback would resolve.
+  assert.equal(Logic.eventSoundPath("notificationReceived", parsed.settings.sounds), ASSET_DIR + "bell.oga")
+  assert.equal(Logic.eventSoundPath("windowOpened", parsed.settings.sounds), ASSET_DIR + "complete.oga")
+  // Untouched events keep their defaults.
+  assert.equal(Logic.eventSoundPath("powerConnected", parsed.settings.sounds), ASSET_DIR + "device-added.oga")
+})
+
+test("a none assignment persists, stays valid, and resolves to silence", () => {
+  // "none" is a first-class catalog id: a file assigning it parses strictly
+  // and round-trips byte-stable.
+  const silent = { enabled: true, volume: 0.5, desktopEnabled: true, notificationsEnabled: true, sounds: { ...Logic.defaultEventSounds(), volumeUp: "none", notificationReceived: "none" } }
+  const parsed = Logic.parseSettings(Logic.serializeSettings(silent))
+  assert.equal(parsed.ok, true)
+  assert.deepEqual(plain(parsed.settings.sounds), plain(silent.sounds))
+  // Both assignments resolve to no path: silence, not the event default.
+  assert.equal(Logic.eventSoundPath("volumeUp", parsed.settings.sounds), "")
+  assert.equal(Logic.eventSoundPath("notificationReceived", parsed.settings.sounds), "")
+  // Unrelated events keep their default cue.
+  assert.equal(Logic.eventSoundPath("windowOpened", parsed.settings.sounds), ASSET_DIR + "device-added.oga")
+  // "none" is never treated as stale by the id helper.
+  assert.equal(Logic.eventSoundId("volumeUp", parsed.settings.sounds), "none")
+})
+
+test("serializeSettings always emits the complete v4 schema", () => {
+  const text = Logic.serializeSettings({ enabled: true, volume: 0.5, desktopEnabled: false, notificationsEnabled: true, sounds: Logic.defaultEventSounds() })
   const parsed = JSON.parse(text)
-  assert.deepEqual(plain(parsed), {
-    version: 3,
+  assert.deepEqual(plain(parsed), plain({
+    version: 4,
     enabled: true,
     volume: 0.5,
     desktopEnabled: false,
-    notificationsEnabled: true
-  })
-  // A serialized v3 file must itself parse strictly.
+    notificationsEnabled: true,
+    sounds: Logic.defaultEventSounds()
+  }))
+  // A serialized v4 file must itself parse strictly.
   assert.equal(Logic.parseSettings(text).ok, true)
 })
 
@@ -292,17 +336,68 @@ test("the four system events are classified as system events, and the notificati
     assert.equal(Logic.isNotificationEvent(bad), false, String(bad))
 })
 
-test("every system event maps to the stock freedesktop asset, the notification event to the local asset", () => {
-  const expected = {
-    volumeUp: ASSET_DIR + "audio-volume-change.oga",
-    volumeDown: ASSET_DIR + "audio-volume-change.oga",
-    powerConnected: ASSET_DIR + "power-plug.oga",
-    powerDisconnected: ASSET_DIR + "power-unplug.oga",
-    notificationReceived: "assets/agent-needs-input.wav"
+// ---------------------------------------------------------- sound catalog
+
+test("the catalog exposes every installed distinct freedesktop sound plus the local asset", () => {
+  // Every catalog entry resolves: id, label; every entry except "none" has
+  // a playable path.
+  for (const id of Logic.SOUND_IDS) {
+    const entry = Logic.SOUND_CATALOG[id]
+    assert.ok(entry, id)
+    if (id !== "none")
+      assert.ok(entry.path !== "", id + " has a path")
+    assert.ok(entry.label !== "", id + " has a label")
   }
-  for (const [name, asset] of Object.entries(expected))
-    assert.equal(Logic.assetPath(name), asset, name)
+  // The theme entries are the distinct .oga files of the installed theme
+  // (18 after symlink canonicalization), plus the one local plugin asset,
+  // plus the "none" silence option.
+  assert.equal(Logic.SOUND_IDS.length, 20)
+  assert.ok(Logic.SOUND_IDS.indexOf("agent-needs-input") !== -1)
+  assert.ok(Logic.SOUND_IDS.indexOf("none") !== -1)
+  assert.equal(Logic.SOUND_CATALOG.none.path, "")
+  // Symlink aliases of the theme are not separate catalog entries: their
+  // canonical target is.
+  for (const alias of ["power-plug", "power-unplug", "dialog-error", "window-attention", "window-question", "screen-capture", "network-connectivity-established", "network-connectivity-lost"])
+    assert.equal(Logic.SOUND_IDS.indexOf(alias), -1, alias + " is a symlink alias, not a catalog id")
 })
+
+test("isValidSound accepts catalog ids and rejects everything else", () => {
+  for (const id of Logic.SOUND_IDS)
+    assert.equal(Logic.isValidSound(id), true, id)
+  assert.equal(Logic.isValidSound("none"), true)
+  for (const bad of ["", null, undefined, "device-added.oga", "/usr/share/sounds/freedesktop/stereo/bell.oga", "../assets/agent-needs-input.wav", "bell ", "Bell", 42])
+    assert.equal(Logic.isValidSound(bad), false, String(bad) + " must be rejected")
+})
+
+test("eventSoundPath resolves the assigned sound and falls back to the event default", () => {
+  const sounds = { ...Logic.defaultEventSounds(), notificationReceived: "phone-incoming-call" }
+  assert.equal(Logic.eventSoundPath("notificationReceived", sounds), ASSET_DIR + "phone-incoming-call.oga")
+  assert.equal(Logic.eventSoundPath("windowOpened", sounds), ASSET_DIR + "device-added.oga")
+  // A stale id (sound removed from the catalog) fails safe to the default.
+  assert.equal(Logic.eventSoundPath("windowClosed", { windowClosed: "deleted-sound" }), ASSET_DIR + "device-removed.oga")
+  assert.equal(Logic.eventSoundPath("windowClosed", null), ASSET_DIR + "device-removed.oga")
+  assert.equal(Logic.eventSoundPath("unknownEvent", sounds), "")
+  // The notification default is the relative local asset (resolved by the
+  // controller through Qt.resolvedUrl).
+  assert.equal(Logic.eventSoundPath("notificationReceived", null), "assets/agent-needs-input.wav")
+  // The explicit "none" assignment is silence: an empty path, never a
+  // fallback to the event default — and never confused with a stale id.
+  assert.equal(Logic.eventSoundPath("windowOpened", { ...sounds, windowOpened: "none" }), "")
+  assert.equal(Logic.eventSoundId("windowOpened", { ...sounds, windowOpened: "none" }), "none")
+  assert.equal(Logic.eventSoundId("windowOpened", { windowOpened: "none" }), "none")
+})
+
+test("eventSoundId returns the assignment or the event default, never a stale id", () => {
+  const sounds = { ...Logic.defaultEventSounds(), workspaceSwitched: "bell" }
+  assert.equal(Logic.eventSoundId("workspaceSwitched", sounds), "bell")
+  assert.equal(Logic.eventSoundId("windowOpened", sounds), "device-added")
+  assert.equal(Logic.eventSoundId("windowOpened", { windowOpened: "stale" }), "device-added")
+  assert.equal(Logic.eventSoundId("windowOpened", null), "device-added")
+  assert.equal(Logic.eventSoundId("unknownEvent", sounds), "")
+  // "none" survives as an assignment.
+  assert.equal(Logic.eventSoundId("volumeUp", { volumeUp: "none" }), "none")
+})
+
 
 // The old agent-named public surface is gone: no event id, no helper, no
 // asset constant. Only the migration grammar still spells the retired v2

@@ -18,6 +18,10 @@
 // files seed safe defaults; invalid content is never overwritten — the
 // current settings are preserved and the error is reported truthfully.
 // Readiness stays false until the initial settings decision is made.
+// Each event's cue is a catalog sound id under the v4 settings' `sounds`
+// map (issue #7): assigned through setEventSound (panel or IPC), persisted
+// with the rest of the schema, and resolved at play time — a stale id
+// fails safe to the event's default cue.
 //
 // Automatic playback has three kinds. Desktop events (windowOpened,
 // windowClosed, workspaceSwitched) are gated by desktop activation,
@@ -35,6 +39,13 @@
 // cues, the notifications switch and observer readiness loss cut only
 // notification cues, while master mute and safety loss stop everything.
 //
+// Rapid automatic non-notification events preempt one another: when an
+// otherwise-eligible automatic event arrives while a different automatic
+// non-notification cue owns the voice, the old cue is terminated and the
+// new event is retained as a single latest-only pending replacement, which
+// starts only after the old process has actually exited — never overlapping
+// it. A further automatic event replaces the pending intent; a preview or a
+// notification cue is never preempted (and never preempts).
 // Playback is a single voice with a synchronous reservation: `playing`
 // becomes true the moment a play is accepted, before the child process is
 // even requested, so same-tick bursts see one accepted play and then
@@ -76,20 +87,43 @@ Item {
     readonly property real volume: root._settings.volume
     readonly property bool desktopEnabled: root._settings.desktopEnabled
     readonly property bool notificationsEnabled: root._settings.notificationsEnabled
+    readonly property var eventSounds: root._settings.sounds
+    readonly property var soundCatalog: ChimeLogic.SOUND_CATALOG
+    readonly property var soundIds: ChimeLogic.SOUND_IDS
+    readonly property string soundNoneId: ChimeLogic.SOUND_NONE
     readonly property bool playing: root._reserved || player.running
 
-    // The notification cue is a local plugin asset. Resolved relative to this
-    // file through Qt.resolvedUrl so playback never depends on the host
-    // shell's working directory. pw-play receives the path as argv[1], so the
-    // file:// prefix is removed here before decoding to a native path.
-    readonly property string notificationAssetPath: {
-        var url = Qt.resolvedUrl(ChimeLogic.NOTIFICATION_ASSET);
+    // The catalog id assigned to an event (with event-default fallback for
+    // a missing or stale assignment; "none" passes through). The panel
+    // reads this for each dropdown's current value.
+    function eventSoundId(eventName) {
+        return ChimeLogic.eventSoundId(eventName, root._settings.sounds);
+    }
+
+    // Resolves a relative asset (the plugin-local cue) through Qt.resolvedUrl
+    // so playback never depends on the host shell's working directory;
+    // absolute theme paths pass through. pw-play receives the path as
+    // argv[1], so the file:// prefix is removed before decoding.
+    function _resolvedAssetPath(path) {
+        if (!path || path.indexOf("/") === 0)
+            return path ? path : "";
+        var url = Qt.resolvedUrl(path);
         if (!url)
             return "";
         var s = String(url);
         if (s.indexOf("file://") === 0)
             s = s.slice(7);
         return decodeURIComponent(s);
+    }
+
+    // The playable path for an event under the decided settings: the
+    // assigned catalog sound, falling back to the event default. Theme
+    // entries pass through; the relative local asset is resolved.
+    function _eventAssetPath(eventName) {
+        var path = ChimeLogic.eventSoundPath(eventName, root._settings.sounds);
+        if (!path)
+            return "";
+        return root._resolvedAssetPath(path);
     }
 
     // Internal settings state. `_settings` is the last decided settings; it is
@@ -133,6 +167,14 @@ Item {
     // loss, stop, or destruction so an inapplicable replacement never plays
     // late.
     property string _pendingReplacement: ""
+    // Latest-only pending preview (issue #7 panel behavior): an event whose
+    // preview was requested while a preview already owned the voice — the
+    // previous preview is cut (deliberately, cooldown-exempt) and this one
+    // starts when the voice actually frees. Cleared by any gate loss, stop,
+    // or destruction so a stale preview never plays late. Unlike
+    // _pendingReplacement it starts through preview()'s gates (safety +
+    // cooldown, ignoring mute), so the start path re-validates everything.
+    property string _pendingPreview: ""
 
     // The single playback voice. `running = false` sends SIGTERM; the
     // destructor kills the child, so stopping and destruction both actually
@@ -156,15 +198,17 @@ Item {
     Connections {
         target: player
         function onExited(exitCode) {
-            if (root._destroyed)
-                return;
             if (exitCode !== 0 && !root._deliberateStop)
                 root._playbackError = "pw-play exited with code " + exitCode;
             // The process ended on its own: any pending preemption intent is
             // inapplicable — the voice is not being released by the deliberate
             // replacement — so drop it. A deliberate preemption keeps
             // `_deliberateStop` set until this release, so its retained
-            // replacement survives the exit and starts here.
+            // replacement survives the exit and starts here. A pending
+            // preview is likewise only retained across a deliberate cut of a
+            // preview; a natural preview completion invalidates it.
+            if (root._pendingPreview !== "" && !root._deliberateStop)
+                root._pendingPreview = "";
             if (root._pendingReplacement !== "" && !root._deliberateStop)
                 root._pendingReplacement = "";
             root._releasePlayback(false);
@@ -254,6 +298,19 @@ Item {
         }
         if (root._pendingReplacement !== "")
             root._startPendingReplacement();
+        else if (root._pendingPreview !== "")
+            root._startPendingPreview();
+    }
+
+    // Start the retained latest-only pending preview (issue #7 panel
+    // behavior). Runs only once the voice is actually free, and re-runs
+    // preview()'s own gates — safety, cooldown, asset — so the retained
+    // intent is never entitled to play if the state has changed while it
+    // waited. Deliberately ignores master mute, like any preview.
+    function _startPendingPreview() {
+        var eventName = root._pendingPreview;
+        root._pendingPreview = "";
+        root.preview(eventName);
     }
 
     // Cancel the current playback. If the child is running it is terminated
@@ -336,11 +393,12 @@ Item {
     }
 
     // Safety loss, explicit mute, stop, and unload stop everything — and
-    // clear any pending replacement (also restoring the normal cooldown for
-    // the release it would have caused), which must not play late once the
-    // playback context is gone.
+    // clear any pending replacement or pending preview (also restoring the
+    // normal cooldown for the release it would have caused), which must not
+    // play late once the playback context is gone.
     function _stopAll() {
         root._pendingReplacement = "";
+        root._pendingPreview = "";
         root._skipCooldown = false;
         root._cancelPlayback();
     }
@@ -392,7 +450,9 @@ Item {
         var reason = ChimeLogic.automaticBlockedReason(state);
         if (reason)
             return reason;
-        var asset = ChimeLogic.assetPath(eventName);
+        var asset = root._eventAssetPath(eventName);
+        if (asset === "" && ChimeLogic.eventSoundId(eventName, root._settings.sounds) === ChimeLogic.SOUND_NONE)
+            return "silent (" + eventName + " -> none)";
         if (!asset)
             return "no asset for event: " + eventName;
         root._playbackError = "";
@@ -413,7 +473,9 @@ Item {
         var reason = root._gatesBlocked(eventName);
         if (reason)
             return reason;
-        var asset = ChimeLogic.assetPath(eventName);
+        if (ChimeLogic.eventSoundId(eventName, root._settings.sounds) === ChimeLogic.SOUND_NONE)
+            return "silent (" + eventName + " -> none)";
+        var asset = root._eventAssetPath(eventName);
         if (!asset)
             return "no asset for event: " + eventName;
         if (root.playing) {
@@ -489,7 +551,9 @@ Item {
         var reason = ChimeLogic.notificationBlockedReason(state);
         if (reason)
             return reason;
-        var asset = root.notificationAssetPath;
+        var asset = root._eventAssetPath("notificationReceived");
+        if (asset === "" && ChimeLogic.eventSoundId("notificationReceived", root._settings.sounds) === ChimeLogic.SOUND_NONE)
+            return "silent (notificationReceived -> none)";
         if (!asset)
             return "no asset for event: notificationReceived";
         root._playbackError = "";
@@ -500,18 +564,47 @@ Item {
     }
 
     // Preview an event. Ignores master mute, desktop activation, overlap and
-    // desktop readiness, but never safetyReady. Still bounded by the single
-    // voice and the post-exit cooldown.
+    // desktop readiness, but never safetyReady. Bounded by the single voice
+    // and the post-exit cooldown — except against another preview: choosing
+    // the next sound in the panel (issue #7) must interrupt the previous
+    // preview, so a preview arriving while a preview owns the voice cuts it
+    // deliberately (cooldown-exempt) and is retained as a single
+    // latest-only pending intent that starts when the voice actually frees.
+    // A preview never preempts an automatic cue or a notification cue —
+    // those still report "busy" — and a retained intent re-runs preview()'s
+    // gates before starting, so it is never entitled to play if safety or
+    // the cooldown state has changed while it waited.
     function preview(eventName) {
         if (!ChimeLogic.isValidEvent(eventName))
             return "unknown event: " + eventName;
         if (!root.safetyReady)
             return "not safe";
+        if (root.playing) {
+            if (root._isPreview) {
+                // A preview owns the voice: keep only the latest intent and
+                // cut the running preview. The cut's release must not arm
+                // the cooldown, or the replacement could never start.
+                root._pendingPreview = eventName;
+                if (root._pendingReplacement !== "")
+                    return "busy"; // never preempt an automatic replacement's voice
+                root._deliberateStop = true;
+                root._skipCooldown = true;
+                root._cancelPlayback();
+                return eventName;
+            }
+            return "busy";
+        }
         if (root._cooldownActive)
             return "cooldown";
-        if (root.playing)
-            return "busy";
-        var asset = ChimeLogic.isNotificationEvent(eventName) ? root.notificationAssetPath : ChimeLogic.assetPath(eventName);
+        if (root._pendingPreview !== "") {
+            // No process owns the voice but a retained preview intent is
+            // still waiting inside the release path: keep only the latest.
+            root._pendingPreview = eventName;
+            return eventName;
+        }
+        var asset = root._eventAssetPath(eventName);
+        if (asset === "" && ChimeLogic.eventSoundId(eventName, root._settings.sounds) === ChimeLogic.SOUND_NONE)
+            return "silent (" + eventName + " -> none)";
         if (!asset)
             return "no asset for event: " + eventName;
         root._playbackError = "";
@@ -527,7 +620,28 @@ Item {
         next.volume = partial.volume !== undefined ? partial.volume : root._settings.volume;
         next.desktopEnabled = partial.desktopEnabled !== undefined ? partial.desktopEnabled : root._settings.desktopEnabled;
         next.notificationsEnabled = partial.notificationsEnabled !== undefined ? partial.notificationsEnabled : root._settings.notificationsEnabled;
+        next.sounds = partial.sounds !== undefined ? partial.sounds : root._settings.sounds;
         root._settings = next;
+    }
+
+    // Assign a catalog sound to an event (issue #7). The event must be known
+    // and the sound id must be in the catalog — a raw path can never enter
+    // the settings through this API. Returns a short human-useful string:
+    // "<event> -> <soundId>" on success, else the reason.
+    function setEventSound(eventName, soundId) {
+        if (!ChimeLogic.isValidEvent(eventName))
+            return "unknown event: " + eventName;
+        if (!ChimeLogic.isValidSound(soundId))
+            return "unknown sound: " + soundId;
+        var next = {};
+        for (var id in root._settings.sounds)
+            next[id] = root._settings.sounds[id];
+        next[eventName] = soundId;
+        root._replaceSettings({
+            sounds: next
+        });
+        root._persist();
+        return eventName + " -> " + soundId;
     }
 
     function setEnabled(value) {
@@ -608,6 +722,7 @@ Item {
             volume: root.volume,
             desktopEnabled: root.desktopEnabled,
             notificationsEnabled: root.notificationsEnabled,
+            eventSounds: root.eventSounds,
             notificationReady: root.notificationReady,
             safetyReady: root.safetyReady,
             desktopReady: root.desktopReady,
@@ -637,10 +752,6 @@ Item {
         root._stopAll()
     onDesktopEnabledChanged: if (!root.desktopEnabled)
         root._stopAutomatic()
-    onOverlapBlockedChanged: if (root.overlapBlocked)
-        root._stopAutomatic()
-    onDesktopReadyChanged: if (!root.desktopReady)
-        root._stopDesktop()
     onSystemReadyChanged: if (!root.systemReady)
         root._stopSystem()
     onNotificationsEnabledChanged: if (!root.notificationsEnabled)
@@ -651,6 +762,7 @@ Item {
     Component.onDestruction: {
         root._destroyed = true;
         root._pendingReplacement = "";
+        root._pendingPreview = "";
         if (player.running)
             player.running = false;
     }

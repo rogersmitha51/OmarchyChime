@@ -15,21 +15,88 @@ var SYSTEM_EVENT_IDS = ["volumeUp", "volumeDown", "powerConnected", "powerDiscon
 
 var ASSET_DIR = "/usr/share/sounds/freedesktop/stereo/"
 
-// The notification cue is a local plugin asset; ChimeController resolves the
-// relative path through Qt.resolvedUrl (decoded file URL) so playback never
-// depends on the host shell's working directory. Desktop and system events
-// keep the stock freedesktop sound theme.
+// The plugin's local cue asset; ChimeController resolves relative catalog
+// paths through Qt.resolvedUrl (decoded file URL) so playback never depends
+// on the host shell's working directory. Theme entries are absolute paths
+// and need no resolution.
 var NOTIFICATION_ASSET = "assets/agent-needs-input.wav"
 
-var ASSET_NAMES = {
-  windowOpened: ASSET_DIR + "device-added.oga",
-  windowClosed: ASSET_DIR + "device-removed.oga",
-  workspaceSwitched: ASSET_DIR + "audio-volume-change.oga",
-  volumeUp: ASSET_DIR + "audio-volume-change.oga",
-  volumeDown: ASSET_DIR + "audio-volume-change.oga",
-  powerConnected: ASSET_DIR + "power-plug.oga",
-  powerDisconnected: ASSET_DIR + "power-unplug.oga",
-  notificationReceived: NOTIFICATION_ASSET
+// The selectable sound catalog (issue #7): every cue a user can assign to
+// an event, each with a stable id (the serialized settings value) and the
+// path pw-play receives. Theme entries are the distinct audio files of the
+// installed sound-theme-freedesktop package. Symlink aliases of the theme
+// (power-plug.oga, power-unplug.oga, dialog-error.oga, window-attention.oga,
+// window-question.oga, network-connectivity-*.oga, screen-capture.oga) are
+// excluded because they play byte-identical audio to their targets, and the
+// channel/test tones (audio-channel-*.oga, audio-test-signal.oga) are
+// excluded because they are calibration signals, not event cues. The
+// agent-needs-input entry is the one local plugin asset.
+//
+// The special id "none" silences an event: no process is ever spawned for
+// it. It is a first-class catalog entry (valid everywhere a sound id is),
+// not a missing assignment — an assignment must never silently fall back
+// to the event default just because the user chose silence.
+var SOUND_NONE = "none"
+
+var SOUND_CATALOG = {
+  "alarm-clock-elapsed": { path: ASSET_DIR + "alarm-clock-elapsed.oga", label: "Alarm clock elapsed" },
+  "agent-needs-input": { path: NOTIFICATION_ASSET, label: "Agent needs input (plugin)" },
+  "audio-volume-change": { path: ASSET_DIR + "audio-volume-change.oga", label: "Volume change" },
+  "bell": { path: ASSET_DIR + "bell.oga", label: "Bell" },
+  "camera-shutter": { path: ASSET_DIR + "camera-shutter.oga", label: "Camera shutter" },
+  "complete": { path: ASSET_DIR + "complete.oga", label: "Complete" },
+  "device-added": { path: ASSET_DIR + "device-added.oga", label: "Device added" },
+  "device-removed": { path: ASSET_DIR + "device-removed.oga", label: "Device removed" },
+  "dialog-information": { path: ASSET_DIR + "dialog-information.oga", label: "Dialog information" },
+  "dialog-warning": { path: ASSET_DIR + "dialog-warning.oga", label: "Dialog warning" },
+  "message": { path: ASSET_DIR + "message.oga", label: "Message" },
+  "message-new-instant": { path: ASSET_DIR + "message-new-instant.oga", label: "Message (new instant)" },
+  "phone-incoming-call": { path: ASSET_DIR + "phone-incoming-call.oga", label: "Phone incoming call" },
+  "phone-outgoing-busy": { path: ASSET_DIR + "phone-outgoing-busy.oga", label: "Phone outgoing busy" },
+  "phone-outgoing-calling": { path: ASSET_DIR + "phone-outgoing-calling.oga", label: "Phone outgoing calling" },
+  "service-login": { path: ASSET_DIR + "service-login.oga", label: "Service login" },
+  "service-logout": { path: ASSET_DIR + "service-logout.oga", label: "Service logout" },
+  "suspend-error": { path: ASSET_DIR + "suspend-error.oga", label: "Suspend error" },
+  "trash-empty": { path: ASSET_DIR + "trash-empty.oga", label: "Trash emptied" },
+  "none": { path: "", label: "None (silent)" }
+}
+
+var SOUND_IDS = [
+  "alarm-clock-elapsed",
+  "agent-needs-input",
+  "audio-volume-change",
+  "bell",
+  "camera-shutter",
+  "complete",
+  "device-added",
+  "device-removed",
+  "dialog-information",
+  "dialog-warning",
+  "message",
+  "message-new-instant",
+  "phone-incoming-call",
+  "phone-outgoing-busy",
+  "phone-outgoing-calling",
+  "service-login",
+  "service-logout",
+  "suspend-error",
+  "trash-empty",
+  "none"
+]
+
+// Per-event default sound ids: exactly the cues 0.3.0 played before
+// selection existed, so a v3 migration is audibly identical to the previous
+// candidate (power-plug.oga and power-unplug.oga are theme symlinks of
+// device-added.oga and device-removed.oga, hence the canonical ids here).
+var EVENT_DEFAULT_SOUNDS = {
+  windowOpened: "device-added",
+  windowClosed: "device-removed",
+  workspaceSwitched: "audio-volume-change",
+  notificationReceived: "agent-needs-input",
+  volumeUp: "audio-volume-change",
+  volumeDown: "audio-volume-change",
+  powerConnected: "device-added",
+  powerDisconnected: "device-removed"
 }
 
 var DEFAULT_SETTINGS = {
@@ -39,7 +106,23 @@ var DEFAULT_SETTINGS = {
   notificationsEnabled: false
 }
 
-var SETTINGS_VERSION = 3
+// Default per-event sound assignment: the catalog ids of the cues this
+// plugin has always played (see EVENT_DEFAULT_SOUNDS).
+function defaultEventSounds() {
+  return {
+    windowOpened: EVENT_DEFAULT_SOUNDS.windowOpened,
+    windowClosed: EVENT_DEFAULT_SOUNDS.windowClosed,
+    workspaceSwitched: EVENT_DEFAULT_SOUNDS.workspaceSwitched,
+    notificationReceived: EVENT_DEFAULT_SOUNDS.notificationReceived,
+    volumeUp: EVENT_DEFAULT_SOUNDS.volumeUp,
+    volumeDown: EVENT_DEFAULT_SOUNDS.volumeDown,
+    powerConnected: EVENT_DEFAULT_SOUNDS.powerConnected,
+    powerDisconnected: EVENT_DEFAULT_SOUNDS.powerDisconnected
+  }
+}
+
+var SETTINGS_VERSION = 4
+var V3_SETTINGS_VERSION = 3
 var V2_SETTINGS_VERSION = 2
 var LEGACY_SETTINGS_VERSION = 1
 var VOLUME_MIN = 0
@@ -51,8 +134,42 @@ function defaults() {
     enabled: DEFAULT_SETTINGS.enabled,
     volume: DEFAULT_SETTINGS.volume,
     desktopEnabled: DEFAULT_SETTINGS.desktopEnabled,
-    notificationsEnabled: DEFAULT_SETTINGS.notificationsEnabled
+    notificationsEnabled: DEFAULT_SETTINGS.notificationsEnabled,
+    sounds: defaultEventSounds()
   }
+}
+
+function isValidSound(soundId) {
+  return SOUND_IDS.indexOf(String(soundId || "")) !== -1
+}
+
+function catalogSound(soundId) {
+  return SOUND_CATALOG[String(soundId || "")] || null
+}
+
+// The playable path for an event under a settings "sounds" map. Falls back
+// to the event's default cue when the event is unknown or its sound id is
+// not in the catalog — a stale or hand-edited map must fail safe to the
+// stock cue, never to silence or an arbitrary file. The explicit "none"
+// assignment is silence: an empty path, never a fallback to the default.
+function eventSoundPath(eventName, sounds) {
+  var id = sounds ? sounds[eventName] : ""
+  if (id === SOUND_NONE)
+    return ""
+  if (!id || !isValidSound(id))
+    id = EVENT_DEFAULT_SOUNDS[eventName]
+  var entry = catalogSound(id)
+  return entry ? entry.path : ""
+}
+
+// The catalog id currently assigned to an event; falls back to the event's
+// default id when the assignment is missing or stale. "none" is a valid
+// assignment and is returned as-is.
+function eventSoundId(eventName, sounds) {
+  var id = sounds ? sounds[eventName] : ""
+  if (id === SOUND_NONE)
+    return SOUND_NONE
+  return isValidSound(id) ? id : (EVENT_DEFAULT_SOUNDS[eventName] || "")
 }
 
 function isValidEvent(name) {
@@ -73,8 +190,9 @@ function isSystemEvent(name) {
 }
 
 function assetPath(eventName) {
-  var name = ASSET_NAMES[eventName]
-  return name ? name : ""
+  // Retained for callers that play without settings (none today): the
+  // event's default catalog cue.
+  return eventSoundPath(eventName, null)
 }
 
 // The single playback voice: one pw-play invocation. No shell, no quoting —
@@ -84,19 +202,69 @@ function playerCommand(asset, volume) {
   return ["/usr/bin/pw-play", "--volume", String(volume), String(asset)]
 }
 
-// Strict parse of the settings file. The complete v3 schema is
-// {version: 3, enabled: boolean, volume: finite number in [0, 1],
-// desktopEnabled: boolean, notificationsEnabled: boolean}. A file missing
-// any key, or with any invalid field, is rejected as a whole, so a malformed
-// or incomplete reload can never partially apply — mute in particular must
-// survive intact. Unknown keys are ignored for forward compatibility.
+// Strict parse of the settings file. The complete v4 schema is
+// {version: 4, enabled: boolean, volume: finite number in [0, 1],
+// desktopEnabled: boolean, notificationsEnabled: boolean,
+// sounds: {event: soundId for all eight events, ids from SOUND_CATALOG}}.
+// A file missing any key, or with any invalid field, is rejected as a
+// whole, so a malformed or incomplete reload can never partially apply —
+// mute in particular must survive intact. Unknown keys are ignored for
+// forward compatibility.
 //
-// A complete v2 file ({version: 2, enabled, volume, desktopEnabled,
-// agentInputEnabled}) is accepted and migrated with the old switch carried
-// over verbatim into notificationsEnabled. A complete v1 file ({version: 1,
-// enabled, volume, desktopEnabled}) is accepted and migrated with the new
-// notifications switch off, preserving every existing field. v1/v2 files
-// with missing or invalid fields are rejected like any other malformed file.
+// A complete v3 file is accepted and migrated: every field preserved and
+// the per-event sounds map seeded from EVENT_DEFAULT_SOUNDS, which is
+// audibly identical to what 0.3.0 played (power-plug.oga/power-unplug.oga
+// are theme symlinks of device-added.oga/device-removed.oga). Complete v2
+// and v1 files keep their existing migrations (agentInputEnabled carried
+// over verbatim; v1's notifications off) and then gain the same default
+// sounds map. Files with missing or invalid fields are rejected like any
+// other malformed file.
+function parseSoundsMap(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw))
+    return null
+  var out = {}
+  for (var i = 0; i < EVENT_IDS.length; i++) {
+    var eventName = EVENT_IDS[i]
+    var id = raw[eventName]
+    if (typeof id !== "string" || !isValidSound(id))
+      return null
+    out[eventName] = id
+  }
+  return out
+}
+
+// A v3 file has no sounds key: seed the per-event defaults (audibly
+// identical to what 0.3.0 played). A v4 file must carry a complete valid
+// sounds map; anything else rejects the whole file.
+function migrateV3(parsed) {
+  return {
+    ok: true,
+    settings: {
+      enabled: parsed.enabled,
+      volume: parsed.volume,
+      desktopEnabled: parsed.desktopEnabled,
+      notificationsEnabled: parsed.notificationsEnabled,
+      sounds: defaultEventSounds()
+    }
+  }
+}
+
+function migrateV4(parsed) {
+  var sounds = parseSoundsMap(parsed.sounds)
+  if (!sounds)
+    return { ok: false, error: "sounds must map every event to a known sound id" }
+  return {
+    ok: true,
+    settings: {
+      enabled: parsed.enabled,
+      volume: parsed.volume,
+      desktopEnabled: parsed.desktopEnabled,
+      notificationsEnabled: parsed.notificationsEnabled,
+      sounds: sounds
+    }
+  }
+}
+
 function parseSettings(text) {
   var parsed
   try {
@@ -122,7 +290,8 @@ function parseSettings(text) {
         enabled: parsed.enabled,
         volume: parsed.volume,
         desktopEnabled: parsed.desktopEnabled,
-        notificationsEnabled: false
+        notificationsEnabled: false,
+        sounds: defaultEventSounds()
       }
     }
   }
@@ -142,11 +311,12 @@ function parseSettings(text) {
         enabled: parsed.enabled,
         volume: parsed.volume,
         desktopEnabled: parsed.desktopEnabled,
-        notificationsEnabled: parsed.agentInputEnabled
+        notificationsEnabled: parsed.agentInputEnabled,
+        sounds: defaultEventSounds()
       }
     }
   }
-  if (parsed.version !== SETTINGS_VERSION)
+  if (parsed.version !== SETTINGS_VERSION && parsed.version !== V3_SETTINGS_VERSION)
     return { ok: false, error: "unsupported settings version: " + parsed.version }
   if (typeof parsed.enabled !== "boolean")
     return { ok: false, error: "enabled must be a boolean" }
@@ -157,25 +327,21 @@ function parseSettings(text) {
     return { ok: false, error: "desktopEnabled must be a boolean" }
   if (typeof parsed.notificationsEnabled !== "boolean")
     return { ok: false, error: "notificationsEnabled must be a boolean" }
-
-  return {
-    ok: true,
-    settings: {
-      enabled: parsed.enabled,
-      volume: parsed.volume,
-      desktopEnabled: parsed.desktopEnabled,
-      notificationsEnabled: parsed.notificationsEnabled
-    }
-  }
+  if (parsed.version === V3_SETTINGS_VERSION)
+    return migrateV3(parsed)
+  return migrateV4(parsed)
 }
 
+
 function serializeSettings(settings) {
+  var sounds = settings.sounds ? settings.sounds : defaultEventSounds()
   return JSON.stringify({
     version: SETTINGS_VERSION,
     enabled: !!settings.enabled,
     volume: settings.volume,
     desktopEnabled: !!settings.desktopEnabled,
-    notificationsEnabled: !!settings.notificationsEnabled
+    notificationsEnabled: !!settings.notificationsEnabled,
+    sounds: sounds
   }, null, 2) + "\n"
 }
 

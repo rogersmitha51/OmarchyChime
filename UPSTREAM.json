@@ -4,7 +4,7 @@
     "pluginId": "nick.chime",
     "version": "0.3.0",
     "status": "0.3.0 candidate (unreleased) on top of published 0.2.0; source uncommitted/unpushed, not a published release",
-    "description": "Independent desktop-sounds 0.3.0 candidate on top of published 0.2.0. Adds volume up/down and power connect/disconnect cues from the default PipeWire sink and UPower, plus a universal notification cue: every newly accepted non-suppressed session notification emits notificationReceived and plays one cue, while updates/replacements and suppressed notifications stay silent. Reads original DND, lock, and idle state; passively observes the session notification bus; owns no notification service, popup, history, or UI — Omarchy remains the notification owner.",
+    "description": "Independent desktop-sounds 0.3.0 candidate on top of published 0.2.0. Adds volume up/down and power connect/disconnect cues from the default PipeWire sink and UPower, a universal notification cue: every newly accepted non-suppressed session notification emits notificationReceived and plays one cue, while updates/replacements and suppressed notifications stay silent, and per-event sound selection (issue #7): each event's cue is chosen from a catalog of the installed freedesktop theme's distinct sounds plus the local plugin asset, stored in the v4 settings' sounds map with v3/v2/v1 migration, assignable via the settings panel and the chime sound IPC command. Reads original DND, lock, and idle state; passively observes the session notification bus; owns no notification service, popup, history, or UI — Omarchy remains the notification owner.",
     "referenceImplementation": "Omarchy shell plugin conventions and gobijan.ui-sounds desktop-event filters; no notification implementation retained."
   },
   "runtimeBaseline": {
@@ -35,9 +35,27 @@
       "DesktopEvents.qml (window/workspace adapter)",
       "SystemEvents.qml (volume/power adapter)",
       "NotificationEvents.qml (universal notification observer adapter)",
+      "Settings.qml (on-demand settings panel, issue #6)",
       "SystemLogic.js (volume/power event policy)",
-      "notification_observer.py (session D-Bus monitor child)"
+      "notification_observer.py (session D-Bus monitor child)",
+      "BarWidget.qml (top-bar bell icon, service+panel+bar-widget kinds)"
     ]
+  },
+  "panel": {
+    "issue": 6,
+    "entryPoint": "Settings.qml",
+    "lifecycle": "First-party on-demand panel pattern: the plugin declares both service and panel entry points (keepLoaded remains true), and the shell panel loader injects the already loaded live service into the panel.",
+    "integration": "Service.qml exposes `readonly property alias controllerApi: controller`; the panel reads and writes that single live controller slice and never creates a second ChimeController, settings store, player, or notification observer. No optimistic duplicate UI state: controls bind to the controller's reactive properties and invoke its existing setters (enabled/setEnabled, volume/setVolume, desktopEnabled/setDesktopEnabled, notificationsEnabled/setNotificationsEnabled), persisting through the existing schema-v3 store; writes are disabled until settingsReady. Previews call controllerApi.preview(eventName) once per event and display the returned string (event name or a blocking reason: not safe, busy, cooldown, missing asset). Diagnostics read the service's safetyReason and overlapReason() plus controller status; they expose no notification contents or raw telemetry.",
+    "invocation": "Summoned and closed entirely through the shell panel host: `omarchy-shell shell summon nick.chime '{}'`, `omarchy-shell shell hide nick.chime`, `omarchy-shell shell toggle nick.chime '{}'`; user-initiated close routes through shell.hide(\"nick.chime\"). The chime IPC target and its commands remain unchanged and authoritative; ipcCommands are not extended.",
+    "scope": "Exposes only the controls and previews that already exist: master sounds on/off, Chime relative volume 0-1 (committed on release or discrete keyboard h/l, not per drag frame), desktop sounds on/off, notification sounds on/off, and one preview action per existing event (windowOpened, windowClosed, workspaceSwitched, volumeUp, volumeDown, powerConnected, powerDisconnected, notificationReceived). No new playback, notification, persistence, queue, retry, or telemetry semantics; Omarchy remains the notification owner."
+  },
+  "barWidget": {
+    "issue": 4,
+    "entryPoint": "BarWidget.qml",
+    "pattern": "First-party bar-widget conventions (omarchy.menu icon + omarchy.media service+bar-widget pairing): BarWidget root, WidgetButton with a Nerd Font bell glyph, bar-injected shell/host access.",
+    "integration": "Reaches the one live controller through the shell host: bar.shell.firstPartyServiceFor(\"nick.chime\").controllerApi. Left click runs `omarchy-shell shell toggle nick.chime '{}'` (the existing on-demand settings panel, no second UI); right click calls controllerApi.setEnabled(!enabled) — the compact mute control deferred from issue #4; wheel steps volume ±5% clamped to 0-1 via setVolume. The glyph is bell-ring (enabled) or bell-off (muted), dimmed while settings are loading. No second controller/store/player/observer and no new IPC verbs.",
+    "placement": "User-controlled placement only: manifest declares barWidget.defaultSection right; enabling (`omarchy plugin enable nick.chime`) inserts the layout entry there and `omarchy bar move nick.chime --section left|center|right` relocates it. The plugin never edits shell.json bar layout or other widgets.",
+    "verification": "Live on 2026-09-12: widget registered (debugBarGeometry slot itemVisible), bell-ring glyph rendered on the bar and swapped to dimmed bell-off on `chime mute` (screenshot-confirmed), unmute restored bell-ring; panel summon/hide/toggle round trips via the shared host still pass with the bar-widget kind present; `omarchy plugin validate .`, strict qmllint (all product QML/JS + tests/service-safety.qml with the installed host's qs mapping), 44 Node and 35 Python tests green. Note: bar-widget QML edits require a normal shell restart to take effect (registry re-registers the same component on hot reload; Qt's qmlcache also served stale bytecode until cleared)."
   },
   "integrationFields": {
     "safetyReady": "conservative presence and valid known fields of DND/lock/idle services + unlocked/nonidle/nonDND + real screen + settled startup",
@@ -54,9 +72,12 @@
       "volume <0-1>",
       "desktop on|off",
       "notifications on|off",
+      "sound <event> <soundId>",
+      "sounds",
       "preview <eventName>",
       "help"
-    ]
+    ],
+    "soundSelection": "issue #7: every event's cue is a catalog sound id in the v4 settings' sounds map; setEventSound validates against SOUND_CATALOG and persists; a stale id fails safe to the event default; panel exposes one Dropdown per event"
   },
   "assets": {
     "agent-needs-input.wav": {
@@ -73,9 +94,10 @@
         "workspaceSwitched": "audio-volume-change.oga",
         "volumeUp": "audio-volume-change.oga",
         "volumeDown": "audio-volume-change.oga",
-        "powerConnected": "power-plug.oga",
-        "powerDisconnected": "power-unplug.oga"
+        "powerConnected": "device-added.oga (theme default power-plug.oga is a symlink)",
+        "powerDisconnected": "device-removed.oga (theme default power-unplug.oga is a symlink)"
       },
+      "catalog": "issue #7: the 18 distinct theme .oga files after symlink canonicalization (power-plug, power-unplug, dialog-error, window-attention, window-question, screen-capture, network-connectivity-* excluded as symlink aliases; audio-channel-*, audio-test-signal excluded as calibration tones) plus the one local plugin asset, exposed as SOUND_CATALOG in ChimeLogic.js",
       "note": "Stock sound-theme-freedesktop files provided by the host desktop, not shipped by this plugin; the notification cue is the only local asset. The asset file and provenance are kept from alpha 2 (originally the agent-needs-input cue); only its semantic role changed — it now cues every newly accepted non-suppressed notification via notificationReceived."
     }
   },
@@ -91,19 +113,22 @@
       "status": "0.3.0 candidate (unreleased, on top of published 0.2.0). Not committed, pushed, or published; no release was made. No host patch, system configuration, or service replacement was made.",
       "sourceGatesCompleted": [
         "omarchy plugin validate .",
-        "qmllint -I /usr/lib/qt6/qml -W 0: all product QML/JS and service-safety.qml passed",
+        "Strict qmllint passed across all product QML/JS and tests/service-safety.qml with the installed host's qs imports mapped (-I /usr/lib/qt6/qml + host qml dir).",
         "node --test tests/controller.test.mjs tests/desktop.test.mjs tests/system.test.mjs: 44 tests passed",
         "python -m unittest discover -s tests -p observer_test.py: 35 tests passed"
       ],
+      "panelGateNote": "The issue #6 panel entry point (Settings.qml, manifest `panel` kind) is source-gated (plugin validation; strict qmllint across all product QML/JS and tests/service-safety.qml against the installed host's qs mapping) and its lifecycle passed with a temporarily deployed candidate: summon opened exactly one mapped window, a repeat summon stayed at exactly one, hide closed it, toggle opened then closed it, and a compositor/native window close removed it with the following toggle reopening it, keeping the shell's openPanelIds synchronized. After a normal shell restart cleared the plugin loader's prior cache, an unlocked-session screenshot confirmed a readable current-theme layout, all four controls reflecting saved state, all eight preview actions fitting, and legible ready/clear/idle diagnostics. Keyboard (Esc/Tab/j/k/h/l), direct control interaction, preview sound, IPC-to-open-panel reflection, and disabled/warning/error visuals were not directly observed. After testing, the user's settings were restored byte-for-byte to the original schema-v2 file and the installed plugin was restored and re-enabled.",
       "runtime": [
         "Isolated service harness passed: exercised the service-state safety gating and playback rules of the real product service with injected DND/lock/idle objects.",
-        "Live volume probe passed: a source-loaded SystemEvents.qml adapter attached to the live default PipeWire sink observed output volume 0.65→0.66 emit event ID volumeUp and 0.66→0.65 emit volumeDown; wpctl get-volume confirmed the output volume restored to 0.65. The candidate was not installed into the shell, and the probe did not invoke ChimeController, play or audibly verify a cue, or change the plugin volume."
+        "Live volume probe passed: a source-loaded SystemEvents.qml adapter attached to the live default PipeWire sink observed output volume 0.65→0.66 emit event ID volumeUp and 0.66→0.65 emit volumeDown; wpctl get-volume confirmed the output volume restored to 0.65. The candidate was not installed into the shell, and the probe did not invoke ChimeController, play or audibly verify a cue, or change the plugin volume.",
+        "Panel lifecycle passed with a temporarily deployed candidate: summon opened exactly one mapped window, a repeat summon stayed at exactly one, hide closed it, toggle opened then closed it, and a compositor/native window close removed it with the following toggle reopening it — the shell's openPanelIds stayed synchronized. After a normal shell restart cleared the plugin loader's prior cache, an unlocked-session screenshot confirmed a readable current-theme layout, all four controls reflecting saved state, all eight preview actions fitting, and legible ready/clear/idle diagnostics. Keyboard/control interaction, preview sound, IPC-to-open-panel reflection, and disabled/warning/error visuals were not observed. After testing, the user's settings were restored byte-for-byte to the original schema-v2 file and the installed plugin was restored and re-enabled."
       ],
       "issue2Race": "Issue #2 fix is source-level only in this candidate; no live redeployment or user confirmation has occurred, and the orchestrator performs those. The earlier busy-only fix was incomplete: the next workspace switch commonly arrives after the previous cue's child process exits and during the post-exit cooldown, and both transitions share event name workspaceSwitched, so a distinct-event-name cooldown policy still dropped the repeat. The completed fix exempts automatic non-notification desktop and volume/power cues from the post-exit cooldown entirely (their source state machines already deduplicate non-transitions, and the controller preempts a running voice); the cooldown still governs notification cues and previews.",
       "notYetPerformed": [
         "Physical power plug/unplug transition (UPower on-battery change) and audible verification of the power cue: not yet performed.",
         "Physical multi-monitor audibility: not reconfirmed for this candidate; prior coverage was deterministic tests only.",
-        "Live rapid workspace-switch race after the issue #2 fix: not re-tested on the desktop; the fix is verified at source/policy level only."
+        "Live rapid workspace-switch race after the issue #2 fix: not re-tested on the desktop; the fix is verified at source/policy level only.",
+        "Issue #6 panel interaction coverage: runtime lifecycle and the normal unlocked ready-state layout were verified, but keyboard (Esc/Tab/j/k/h/l), direct control interaction, preview sound, IPC-to-open-panel reflection, and disabled/warning/error visuals were not directly observed."
       ]
     },
     "historical": {
@@ -135,6 +160,6 @@
         ]
       }
     },
-    "limitations": "For the 0.3.0 candidate, physical power plug/unplug and audible power-cue verification are not yet performed, and the issue #2 rapid-workspace-switch race fix has not been re-tested live: it is verified at source/policy level only, with no live redeployment or user confirmation. Physical audibility was confirmed historically only for the user's native ask, not for multi-monitor scenarios; multi-monitor coverage is deterministic tests only. Lock/idle transitions were simulated in the isolated QML harness, not physical lock/unlock. The real desktop notification owner was not changed by the private-bus owner-change fixture. Issue #4 approved ambiguous equal-ID replies as silent (genuine updates/replacements never re-cue); a bar widget remains out of scope. The notification cue is universal: every newly accepted non-suppressed notification cues, so there is no app- or content-based classification scope."
+    "limitations": "For the 0.3.0 candidate, physical power plug/unplug and audible power-cue verification are not yet performed, and the issue #2 rapid-workspace-switch race fix has not been re-tested live: it is verified at source/policy level only, with no live redeployment or user confirmation. The issue #6 panel's runtime lifecycle and normal unlocked ready-state layout passed with a temporarily deployed candidate; keyboard (Esc/Tab/j/k/h/l), direct control interaction, preview sound, IPC-to-open-panel reflection, and disabled/warning/error visuals were not directly observed (see currentCandidate.panelGateNote). Strict qmllint passed across all product QML/JS and tests/service-safety.qml with the installed host's qs mapping. Physical audibility was confirmed historically only for the user's native ask, not for multi-monitor scenarios; multi-monitor coverage is deterministic tests only. Lock/idle transitions were simulated in the isolated QML harness, not physical lock/unlock. The real desktop notification owner was not changed by the private-bus owner-change fixture. Issue #4 approved ambiguous equal-ID replies as silent (genuine updates/replacements never re-cue); a bar widget remains out of scope. The notification cue is universal: every newly accepted non-suppressed notification cues, so there is no app- or content-based classification scope."
   }
 }

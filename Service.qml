@@ -13,6 +13,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "ChimeLogic.js" as ChimeLogic
 
 Item {
     id: service
@@ -22,6 +23,11 @@ Item {
     property var pluginRegistry: null
     property var manifest: null
     property string omarchyPath: ""
+
+    // Public API exposed to panels (e.g. the Settings.qml panel). This is
+    // the single source of truth: a direct alias to the controller slice
+    // declared below, never a wrapper or adapter.
+    readonly property alias controllerApi: controller
 
     // ------------------------------------------------------------ slices
 
@@ -268,6 +274,27 @@ Item {
             return controller.setNotificationsEnabled(v === "on");
         }
 
+        // Issue #7: per-event sound assignment. `sound <event> <soundId>`
+        // assigns; `sound` alone lists every event's current assignment;
+        // `sounds` lists the catalog.
+        function sound(eventName: string, soundId: string): string {
+            var ev = String(eventName || "").trim();
+            var id = String(soundId || "").trim();
+            if (ev === "")
+                return controller.eventSounds ? service.soundsSummary() : "error: sound requires an event name";
+            if (id === "")
+                return "error: sound requires a sound id (see: chime sounds)";
+            return controller.setEventSound(ev, id);
+        }
+
+        function sounds(): string {
+            var ids = controller.soundIds || [];
+            var out = "sounds:";
+            for (var i = 0; i < ids.length; i++)
+                out += " " + ids[i];
+            return out;
+        }
+
         function preview(eventName: string): string {
             var name = String(eventName || "").trim();
             if (name === "")
@@ -276,8 +303,19 @@ Item {
         }
 
         function help(): string {
-            return "chime commands: status, mute, unmute, volume <0-1>, desktop on|off, notifications on|off, preview <eventName>, help";
+            return "chime commands: status, mute, unmute, volume <0-1>, desktop on|off, notifications on|off, sound <event> <soundId>, sounds, sound <event>, preview <eventName>, help";
         }
+    }
+
+    // One line per event: "event -> soundId", for the bare `sound` query.
+    function soundsSummary() {
+        var lines = [];
+        var ids = ChimeLogic.EVENT_IDS;
+        for (var i = 0; i < ids.length; i++) {
+            var ev = ids[i];
+            lines.push(ev + " -> " + ChimeLogic.eventSoundId(ev, controller.eventSounds));
+        }
+        return lines.join("\n");
     }
 
     function statusJson() {
