@@ -30,7 +30,7 @@ all of that.
 
 ### Current 0.3.0 candidate verification
 
-Current-source gates: **44 Node tests**
+Current-source gates: **52 Node tests**
 (`node --test tests/controller.test.mjs tests/desktop.test.mjs
 tests/system.test.mjs`) and **35 Python unittest tests**
 (`python -m unittest discover -s tests -p observer_test.py`) pass; plugin
@@ -45,6 +45,16 @@ output volume 0.65→0.66 emitted event ID `volumeUp`, restoring it
 output volume back at 0.65. The candidate was not installed into the
 shell; that probe did not invoke ChimeController, play or audibly verify
 a cue, or change the plugin volume.
+
+**Omarchy 4.0.3 compatibility:** the update capability-scopes third-party
+plugin access, so Chime no longer relies exclusively on the host's private
+service map. It prefers the legacy direct DND/lock/idle objects when they
+exist, otherwise reads DND from Omarchy's persisted notification state and
+polls the public `lock isLocked` and `idle status` IPC methods. Every
+fallback is parsed strictly and fails closed. Verified on 4.0.3-mac.1:
+all three safety sources became valid, `safety.ready` became true, all
+event adapters became ready, and an installed notification preview started
+and exited without a playback error.
 
 Issue #2 is addressed in this candidate but the fix is only source-level
 so far: after the earlier busy-only fix landed, a second workspace switch
@@ -217,8 +227,8 @@ first-party on-demand panel pattern used by `omarchy.dev-gallery`: the
 plugin declares both `service` and `panel` entry points with
 `keepLoaded: true`, and the shell's panel loader injects the already
 loaded live service into the panel. The panel is a small surface only —
-it exposes the exact controls and previews that already exist and adds no
-new playback, notification, or persistence semantics.
+it exposes the existing settings controls and adds no new playback,
+notification, or persistence semantics.
 
 Architecturally the panel reads and writes the **one live controller**
 shared with the service — it never creates a second settings store,
@@ -300,17 +310,17 @@ controller and persisting through the schema-v4 store:
   `notificationReceived`, `volumeUp`, `volumeDown`, `powerConnected`,
   `powerDisconnected`), each selecting from the sound catalog via
   `setEventSound(event, soundId)` and persisting in the `sounds` map.
-  Previews play the selected sound. Writes stay gated on `settingsReady`.
+  The panel shows human-readable labels such as **Window Opened** while
+  retaining the camelCase ids for settings and IPC (issue #9). Choosing a
+  sound previews it immediately; writes stay gated on `settingsReady`.
 
 ### Previews
 
-One preview action per existing event: `windowOpened`, `windowClosed`,
-`workspaceSwitched`, `volumeUp`, `volumeDown`, `powerConnected`,
-`powerDisconnected`, `notificationReceived`. Each calls
-`controllerApi.preview(eventName)` once — previews are never queued or
-retried — and the returned string is shown visibly: the event name on
-success, or the controller's blocking reason (`not safe`, `busy`,
-`cooldown`, or a missing-asset message) when the preview cannot run.
+The panel has no separate preview buttons (issue #8): choosing a sound in
+an Event sounds dropdown previews the new cue, while choosing **None
+(silent)** plays nothing. One-shot previews remain available through the
+unchanged `chime preview <eventName>` IPC command; the controller still
+enforces safety, single-voice, and cooldown rules.
 
 ### Status feedback
 

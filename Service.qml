@@ -84,29 +84,101 @@ Item {
     // have settled. Until every gate is satisfied, no desktop events are
     // tracked and no sound plays.
 
-    // The shell replaces its _services map wholesale on every sync (reload,
-    // enable/disable, plugin scan). Binding to the live map makes the
-    // serviceFor lookups below re-resolve whenever the map is replaced.
+    // Omarchy <=4.0.2 injected the trusted host object, whose live service map
+    // could be observed directly. Omarchy 4.0.3 capability-scopes third-party
+    // plugins: serviceFor() can resolve only Chime itself. Prefer the direct
+    // objects when available, otherwise use the public state surfaces below.
     readonly property var _services: service.shell && typeof service.shell._services === "object" ? service.shell._services : null
-
     readonly property var _dndService: service._services ? service._serviceFor("omarchy.notifications") : null
     readonly property var _lockService: service._services ? service._serviceFor("omarchy.lock") : null
     readonly property var _idleService: service._services ? service._serviceFor("omarchy.idle") : null
 
-    readonly property bool dndPresent: service._dndService !== null
-    readonly property bool lockPresent: service._lockService !== null
-    readonly property bool idlePresent: service._idleService !== null
-    readonly property bool dndValid: service.dndPresent && typeof service._dndService.doNotDisturb === "boolean"
-    readonly property bool lockValid: service.lockPresent && typeof service._lockService.locked === "boolean"
-    readonly property bool idleValid: service.idlePresent && typeof service._idleService.idledThisCycle === "boolean" && typeof service._idleService.screensaverStartedThisCycle === "boolean" && typeof service._idleService.screensaverWindowCount === "number" && isFinite(service._idleService.screensaverWindowCount) && service._idleService.screensaverWindowCount >= 0
+    readonly property bool _directDndValid: service._dndService !== null && typeof service._dndService.doNotDisturb === "boolean"
+    readonly property bool _directLockValid: service._lockService !== null && typeof service._lockService.locked === "boolean"
+    readonly property bool _directIdleValid: service._idleService !== null && typeof service._idleService.idledThisCycle === "boolean" && typeof service._idleService.screensaverStartedThisCycle === "boolean" && typeof service._idleService.screensaverWindowCount === "number" && isFinite(service._idleService.screensaverWindowCount) && service._idleService.screensaverWindowCount >= 0
+
+    property bool _fallbackDndValid: false
+    property bool _fallbackDndActive: false
+    property bool _fallbackLockValid: false
+    property bool _fallbackLocked: false
+    property bool _fallbackIdleValid: false
+    property bool _fallbackIdleActive: false
+
+    readonly property bool dndPresent: service._directDndValid || service._fallbackDndValid
+    readonly property bool lockPresent: service._directLockValid || service._fallbackLockValid
+    readonly property bool idlePresent: service._directIdleValid || service._fallbackIdleValid
+    readonly property bool dndValid: service.dndPresent
+    readonly property bool lockValid: service.lockPresent
+    readonly property bool idleValid: service.idlePresent
     readonly property bool servicesValid: service.dndValid && service.lockValid && service.idleValid
 
-    // Actual session state. Any of these active means the user is not in a
-    // state where desktop sounds are wanted.
-    readonly property bool dndActive: service.dndValid && service._dndService.doNotDisturb
-    readonly property bool locked: service.lockValid && service._lockService.locked
-    readonly property bool idleActive: service.idleValid && (service._idleService.idledThisCycle || service._idleService.screensaverStartedThisCycle || service._idleService.screensaverWindowCount > 0)
+    // Actual session state. A direct service wins when the older trusted host
+    // API is available; otherwise only a successfully parsed fallback value
+    // can clear the fail-closed gate.
+    readonly property bool dndActive: service._directDndValid ? service._dndService.doNotDisturb : service._fallbackDndValid && service._fallbackDndActive
+    readonly property bool locked: service._directLockValid ? service._lockService.locked : service._fallbackLockValid && service._fallbackLocked
+    readonly property bool idleActive: service._directIdleValid ? (service._idleService.idledThisCycle || service._idleService.screensaverStartedThisCycle || service._idleService.screensaverWindowCount > 0) : service._fallbackIdleValid && service._fallbackIdleActive
     readonly property bool sessionSafe: !service.dndActive && !service.locked && !service.idleActive
+
+    readonly property string _home: Quickshell.env("HOME")
+    readonly property string _dndStatePath: service._home + "/.local/state/omarchy/notifications.json"
+
+    function _applyDndState(text) {
+        var state = ChimeLogic.parseDndState(text);
+        service._fallbackDndValid = state.valid;
+        service._fallbackDndActive = state.active;
+    }
+
+    function _applyLockState(text) {
+        var state = ChimeLogic.parseLockState(text);
+        service._fallbackLockValid = state.valid;
+        service._fallbackLocked = state.active;
+    }
+
+    function _applyIdleState(text) {
+        var state = ChimeLogic.parseIdleState(text);
+        service._fallbackIdleValid = state.valid;
+        service._fallbackIdleActive = state.active;
+    }
+
+    FileView {
+        id: dndStateFile
+        path: service._dndStatePath
+        watchChanges: true
+        printErrors: false
+        onLoaded: service._applyDndState(text())
+        onLoadFailed: service._applyDndState("")
+        onFileChanged: reload()
+    }
+
+    Process {
+        id: lockStateReader
+        command: ["/usr/bin/omarchy-shell", "lock", "isLocked"]
+        stdout: StdioCollector {
+            onStreamFinished: service._applyLockState(this.text)
+        }
+    }
+
+    Process {
+        id: idleStateReader
+        command: ["/usr/bin/omarchy-shell", "idle", "status"]
+        stdout: StdioCollector {
+            onStreamFinished: service._applyIdleState(this.text)
+        }
+    }
+
+    Timer {
+        interval: 500
+        repeat: true
+        triggeredOnStart: true
+        running: !service._directLockValid || !service._directIdleValid
+        onTriggered: {
+            if (!service._directLockValid && !lockStateReader.running)
+                lockStateReader.running = true;
+            if (!service._directIdleValid && !idleStateReader.running)
+                idleStateReader.running = true;
+        }
+    }
 
     readonly property bool hasRealScreen: {
         var screens = Quickshell.screens || [];

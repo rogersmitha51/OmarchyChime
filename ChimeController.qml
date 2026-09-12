@@ -100,6 +100,14 @@ Item {
         return ChimeLogic.eventSoundId(eventName, root._settings.sounds);
     }
 
+    // The human-readable event name for UI display (issue #9), e.g.
+    // "windowOpened" -> "Window Opened". Presentation only: the ids the
+    // panel sends back (setEventSound, preview) and the IPC surface stay
+    // camelCase.
+    function eventLabel(eventName) {
+        return ChimeLogic.eventLabel(eventName);
+    }
+
     // Resolves a relative asset (the plugin-local cue) through Qt.resolvedUrl
     // so playback never depends on the host shell's working directory;
     // absolute theme paths pass through. pw-play receives the path as

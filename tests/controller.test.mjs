@@ -398,6 +398,55 @@ test("eventSoundId returns the assignment or the event default, never a stale id
   assert.equal(Logic.eventSoundId("volumeUp", { volumeUp: "none" }), "none")
 })
 
+test("eventLabel maps every event id to a human-readable name and nothing else", () => {
+  // Issue #9: display names like "Window Opened" for the panel, while the
+  // serialized ids and IPC surface stay camelCase. Exactly one label per
+  // EVENT_IDS member, in order.
+  const ids = Logic.EVENT_IDS
+  const labels = ids.map(id => Logic.eventLabel(id))
+  assert.deepEqual(plain(labels), [
+    "Window Opened",
+    "Window Closed",
+    "Workspace Switched",
+    "Notification Received",
+    "Volume Up",
+    "Volume Down",
+    "Power Connected",
+    "Power Disconnected",
+  ])
+  // Labels are title-cased words separated by single spaces: no camelCase
+  // or raw ids leak into display strings.
+  for (const label of labels) {
+    assert.match(label, /^[A-Z][a-z]+( [A-Z][a-z]+)*$/)
+  }
+  // Unknown or missing ids label as empty, never as raw input.
+  assert.equal(Logic.eventLabel("unknownEvent"), "")
+  assert.equal(Logic.eventLabel(""), "")
+  assert.equal(Logic.eventLabel(null), "")
+  assert.equal(Logic.eventLabel(undefined), "")
+})
+
+test("capability-safe safety-state parsers accept complete public state and fail closed", () => {
+  assert.deepEqual(plain(Logic.parseDndState('{\"version\":3,\"dnd\":false}')), { valid: true, active: false })
+  assert.deepEqual(plain(Logic.parseDndState('{\"dnd\":true}')), { valid: true, active: true })
+  assert.deepEqual(plain(Logic.parseDndState('{}')), { valid: false, active: false })
+  assert.deepEqual(plain(Logic.parseDndState('not json')), { valid: false, active: false })
+
+  assert.deepEqual(plain(Logic.parseLockState(' false ')), { valid: true, active: false })
+  assert.deepEqual(plain(Logic.parseLockState(' true ')), { valid: true, active: true })
+  assert.deepEqual(plain(Logic.parseLockState('unavailable')), { valid: false, active: false })
+
+  const activeIdle = { idle: false, inIdleCycle: true, screensaverStarted: false, screensaverWindows: 0 }
+  const activeScreensaver = { idle: false, inIdleCycle: false, screensaverStarted: false, screensaverWindows: 1 }
+  const activeProtocol = { idle: true, inIdleCycle: false, screensaverStarted: false, screensaverWindows: 0 }
+  const activeLaunch = { idle: false, inIdleCycle: false, screensaverStarted: true, screensaverWindows: 0 }
+  const inactive = { idle: false, inIdleCycle: false, screensaverStarted: false, screensaverWindows: 0 }
+  assert.deepEqual(plain(Logic.parseIdleState(JSON.stringify(inactive))), { valid: true, active: false })
+  for (const state of [activeIdle, activeScreensaver, activeProtocol, activeLaunch])
+    assert.deepEqual(plain(Logic.parseIdleState(JSON.stringify(state))), { valid: true, active: true })
+  assert.deepEqual(plain(Logic.parseIdleState('{\"idle\":false}')), { valid: false, active: false })
+  assert.deepEqual(plain(Logic.parseIdleState(JSON.stringify({ ...inactive, screensaverWindows: -1 }))), { valid: false, active: false })
+})
 
 // The old agent-named public surface is gone: no event id, no helper, no
 // asset constant. Only the migration grammar still spells the retired v2

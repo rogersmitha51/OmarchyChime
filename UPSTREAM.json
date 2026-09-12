@@ -22,12 +22,12 @@
       "python-gobject (observer child; installed 3.56.3-1)"
     ],
     "hostServices": [
-      "omarchy.notifications (read-only: doNotDisturb)",
-      "omarchy.lock (read-only: locked)",
-      "omarchy.idle (read-only: idledThisCycle, screensaverStartedThisCycle, screensaverWindowCount)"
+      "omarchy.notifications (legacy direct doNotDisturb; Omarchy 4.0.3 fallback: persisted notifications.json dnd field)",
+      "omarchy.lock (legacy direct locked; Omarchy 4.0.3 fallback: public lock isLocked IPC)",
+      "omarchy.idle (legacy direct idle-cycle fields; Omarchy 4.0.3 fallback: public idle status IPC)"
     ],
     "hostInjection": [
-      "shell (serviceFor)",
+      "shell (legacy trusted serviceFor; capability-scoped own-service facade on Omarchy 4.0.3)",
       "pluginRegistry (isEnabled)"
     ],
     "components": [
@@ -45,9 +45,9 @@
     "issue": 6,
     "entryPoint": "Settings.qml",
     "lifecycle": "First-party on-demand panel pattern: the plugin declares both service and panel entry points (keepLoaded remains true), and the shell panel loader injects the already loaded live service into the panel.",
-    "integration": "Service.qml exposes `readonly property alias controllerApi: controller`; the panel reads and writes that single live controller slice and never creates a second ChimeController, settings store, player, or notification observer. No optimistic duplicate UI state: controls bind to the controller's reactive properties and invoke its existing setters (enabled/setEnabled, volume/setVolume, desktopEnabled/setDesktopEnabled, notificationsEnabled/setNotificationsEnabled), persisting through the existing schema-v3 store; writes are disabled until settingsReady. Previews call controllerApi.preview(eventName) once per event and display the returned string (event name or a blocking reason: not safe, busy, cooldown, missing asset). Diagnostics read the service's safetyReason and overlapReason() plus controller status; they expose no notification contents or raw telemetry.",
+    "integration": "Service.qml exposes `readonly property alias controllerApi: controller`; the panel reads and writes that single live controller slice and never creates a second ChimeController, settings store, player, or notification observer. No optimistic duplicate UI state: controls bind to the controller's reactive properties and invoke its existing setters (enabled/setEnabled, volume/setVolume, desktopEnabled/setDesktopEnabled, notificationsEnabled/setNotificationsEnabled), persisting through the existing schema-v4 store; writes are disabled until settingsReady. Each event row displays a human-readable label while retaining its camelCase settings/IPC id (issue #9). Choosing a sound calls controllerApi.preview(eventName) once after a successful assignment; issue #8 removes the separate preview-button section. Diagnostics read the service's safetyReason and overlapReason() plus controller status; they expose no notification contents or raw telemetry.",
     "invocation": "Summoned and closed entirely through the shell panel host: `omarchy-shell shell summon nick.chime '{}'`, `omarchy-shell shell hide nick.chime`, `omarchy-shell shell toggle nick.chime '{}'`; user-initiated close routes through shell.hide(\"nick.chime\"). The chime IPC target and its commands remain unchanged and authoritative; ipcCommands are not extended.",
-    "scope": "Exposes only the controls and previews that already exist: master sounds on/off, Chime relative volume 0-1 (committed on release or discrete keyboard h/l, not per drag frame), desktop sounds on/off, notification sounds on/off, and one preview action per existing event (windowOpened, windowClosed, workspaceSwitched, volumeUp, volumeDown, powerConnected, powerDisconnected, notificationReceived). No new playback, notification, persistence, queue, retry, or telemetry semantics; Omarchy remains the notification owner."
+    "scope": "Exposes only the existing settings controls: master sounds on/off, Chime relative volume 0-1 (committed on release or discrete keyboard h/l, not per drag frame), desktop sounds on/off, notification sounds on/off, and one sound dropdown per event. Choosing a sound previews it; there are no separate preview buttons (issue #8). Event labels are capitalized, spaced display strings while storage and IPC retain camelCase ids (issue #9). No new playback, notification, persistence, queue, retry, or telemetry semantics; Omarchy remains the notification owner."
   },
   "barWidget": {
     "issue": 4,
@@ -58,7 +58,7 @@
     "verification": "Live on 2026-09-12: widget registered (debugBarGeometry slot itemVisible), bell-ring glyph rendered on the bar and swapped to dimmed bell-off on `chime mute` (screenshot-confirmed), unmute restored bell-ring; panel summon/hide/toggle round trips via the shared host still pass with the bar-widget kind present; `omarchy plugin validate .`, strict qmllint (all product QML/JS + tests/service-safety.qml with the installed host's qs mapping), 44 Node and 35 Python tests green. Note: bar-widget QML edits require a normal shell restart to take effect (registry re-registers the same component on hot reload; Qt's qmlcache also served stale bytecode until cleared)."
   },
   "integrationFields": {
-    "safetyReady": "conservative presence and valid known fields of DND/lock/idle services + unlocked/nonidle/nonDND + real screen + settled startup",
+    "safetyReady": "conservative valid DND/lock/idle state + unlocked/nonidle/nonDND + real screen + settled startup; prefers legacy direct host services, with strict fail-closed Omarchy 4.0.3 fallbacks through persisted notification DND state and public lock/idle IPC",
     "overlapBlocked": "pluginRegistry.isEnabled('gobijan.ui-sounds') === true; unknown registry or unknown state => blocked",
     "desktopReady": "adapter.ready passed through as DesktopEvents.ready",
     "systemReady": "SystemEvents.ready passed through; OR of volumeReady (default PipeWire sink baseline) and powerReady (UPower on-battery baseline); a missing backend keeps that source unready",
@@ -77,7 +77,7 @@
       "preview <eventName>",
       "help"
     ],
-    "soundSelection": "issue #7: every event's cue is a catalog sound id in the v4 settings' sounds map; setEventSound validates against SOUND_CATALOG and persists; a stale id fails safe to the event default; panel exposes one Dropdown per event"
+    "soundSelection": "issue #7: every event's cue is a catalog sound id in the v4 settings' sounds map; setEventSound validates against SOUND_CATALOG and persists; a stale id fails safe to the event default; the panel exposes one Dropdown per event, previews on selection without separate preview buttons (issue #8), and shows human-readable labels while retaining camelCase ids for settings and IPC (issue #9)"
   },
   "assets": {
     "agent-needs-input.wav": {
@@ -109,18 +109,19 @@
   },
   "verification": {
     "currentCandidate": {
-      "date": "2026-09-11",
+      "date": "2026-09-12",
       "status": "0.3.0 candidate (unreleased, on top of published 0.2.0). Not committed, pushed, or published; no release was made. No host patch, system configuration, or service replacement was made.",
       "sourceGatesCompleted": [
         "omarchy plugin validate .",
         "Strict qmllint passed across all product QML/JS and tests/service-safety.qml with the installed host's qs imports mapped (-I /usr/lib/qt6/qml + host qml dir).",
-        "node --test tests/controller.test.mjs tests/desktop.test.mjs tests/system.test.mjs: 44 tests passed",
+        "node --test tests/controller.test.mjs tests/desktop.test.mjs tests/system.test.mjs: 52 tests passed",
         "python -m unittest discover -s tests -p observer_test.py: 35 tests passed"
       ],
       "panelGateNote": "The issue #6 panel entry point (Settings.qml, manifest `panel` kind) is source-gated (plugin validation; strict qmllint across all product QML/JS and tests/service-safety.qml against the installed host's qs mapping) and its lifecycle passed with a temporarily deployed candidate: summon opened exactly one mapped window, a repeat summon stayed at exactly one, hide closed it, toggle opened then closed it, and a compositor/native window close removed it with the following toggle reopening it, keeping the shell's openPanelIds synchronized. After a normal shell restart cleared the plugin loader's prior cache, an unlocked-session screenshot confirmed a readable current-theme layout, all four controls reflecting saved state, all eight preview actions fitting, and legible ready/clear/idle diagnostics. Keyboard (Esc/Tab/j/k/h/l), direct control interaction, preview sound, IPC-to-open-panel reflection, and disabled/warning/error visuals were not directly observed. After testing, the user's settings were restored byte-for-byte to the original schema-v2 file and the installed plugin was restored and re-enabled.",
       "runtime": [
         "Isolated service harness passed: exercised the service-state safety gating and playback rules of the real product service with injected DND/lock/idle objects.",
         "Live volume probe passed: a source-loaded SystemEvents.qml adapter attached to the live default PipeWire sink observed output volume 0.65→0.66 emit event ID volumeUp and 0.66→0.65 emit volumeDown; wpctl get-volume confirmed the output volume restored to 0.65. The candidate was not installed into the shell, and the probe did not invoke ChimeController, play or audibly verify a cue, or change the plugin volume.",
+        "Omarchy 4.0.3-mac.1 compatibility passed live after deploying the user-owned plugin and restarting the keepLoaded shell service: the capability-scoped shell facade denied the old private DND/lock/idle lookups as expected; persisted DND state plus public lock/idle IPC fallbacks all parsed valid and inactive, safety.ready became true, desktop/system/notification adapters became ready, and notificationReceived preview was accepted, started pw-play, exited, and left playbackError empty. Existing chime settings were preserved.",
         "Panel lifecycle passed with a temporarily deployed candidate: summon opened exactly one mapped window, a repeat summon stayed at exactly one, hide closed it, toggle opened then closed it, and a compositor/native window close removed it with the following toggle reopening it — the shell's openPanelIds stayed synchronized. After a normal shell restart cleared the plugin loader's prior cache, an unlocked-session screenshot confirmed a readable current-theme layout, all four controls reflecting saved state, all eight preview actions fitting, and legible ready/clear/idle diagnostics. Keyboard/control interaction, preview sound, IPC-to-open-panel reflection, and disabled/warning/error visuals were not observed. After testing, the user's settings were restored byte-for-byte to the original schema-v2 file and the installed plugin was restored and re-enabled."
       ],
       "issue2Race": "Issue #2 fix is source-level only in this candidate; no live redeployment or user confirmation has occurred, and the orchestrator performs those. The earlier busy-only fix was incomplete: the next workspace switch commonly arrives after the previous cue's child process exits and during the post-exit cooldown, and both transitions share event name workspaceSwitched, so a distinct-event-name cooldown policy still dropped the repeat. The completed fix exempts automatic non-notification desktop and volume/power cues from the post-exit cooldown entirely (their source state machines already deduplicate non-transitions, and the controller preempts a running voice); the cooldown still governs notification cues and previews.",

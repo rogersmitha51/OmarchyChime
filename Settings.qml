@@ -1,10 +1,10 @@
 // Omarchy Chime settings panel. Binds the controller's live truth, offers
-// per-event sound selection from the catalog (issue #7), one-shot previews
-// of the exact event names, and reactive diagnostics. Lifecycle follows
-// the shell panel contract (open/close flip the FloatingWindow, user close
-// reports via shell.hide). One flat cursor: 3 toggles, volume slider, 8
-// event sound dropdowns, 8 preview buttons; Tab/j/k traverse, h/l adjusts
-// volume, Enter/Space activate, Esc closes, hover shares it.
+// per-event sound selection from the catalog (issue #7) with an audible
+// preview on each choice, and reactive diagnostics. Lifecycle follows the
+// shell panel contract (open/close flip the FloatingWindow, user close
+// reports via shell.hide). One flat cursor: 3 toggles, volume slider, and
+// 8 event sound dropdowns; Tab/j/k traverse, h/l adjusts volume,
+// Enter/Space activate, Esc closes, hover shares it.
 
 pragma ComponentBehavior: Bound
 
@@ -93,17 +93,16 @@ Item {
         readonly property int barSize: 26
     }
 
-    // One cursor over 20 targets: 0..2 toggles, 3 volume, 4..11 event sound
-    // dropdowns, 12..19 previews.
+    // One cursor over 12 targets: 0..2 toggles, 3 volume, 4..11 event sound
+    // dropdowns.
     property bool cursorActive: false
     property int selectedIndex: 0
 
-    readonly property var previewEvents: ["windowOpened", "windowClosed", "workspaceSwitched", "notificationReceived", "volumeUp", "volumeDown", "powerConnected", "powerDisconnected"]
+    readonly property var eventIds: ["windowOpened", "windowClosed", "workspaceSwitched", "notificationReceived", "volumeUp", "volumeDown", "powerConnected", "powerDisconnected"]
 
-    readonly property int targetCount: 20
+    readonly property int targetCount: 12
     readonly property int sliderIndex: 3
     readonly property int soundStart: 4
-    readonly property int previewStart: 12
     // Mouse hover and keyboard share one cursor; select() is the single
     // write point and clamps in bounds.
     function select(index) {
@@ -152,12 +151,8 @@ Item {
                 root.flipNotifications();
             return;
         }
-        if (root.selectedIndex < root.previewStart) {
-            // Volume slider (3) and event sound dropdowns (4..11): activation
-            // is a no-op — the dropdowns open their popup directly.
-            return;
-        }
-        root.previewEvent(root.selectedIndex - root.previewStart);
+        // Volume slider (3) and event sound dropdowns (4..11): activation
+        // is a no-op — the dropdowns open their popup directly.
     }
     // Options for one event's sound dropdown: the whole catalog, labels
     // shown, ids emitted. Rebuilt per row from the controller's catalog.
@@ -190,19 +185,23 @@ Item {
     }
 
     // Assign a catalog sound to an event; the controller validates and
-    // persists. The result string is echoed in the diagnostics line, and
-    // the newly assigned cue is previewed immediately so choosing a sound
-    // is audible feedback, not a blind write — unless the choice is "none",
-    // which is silence and previews nothing.
+    // persists. The result is shown in this section, and the newly assigned
+    // cue is previewed immediately so choosing a sound is audible feedback,
+    // not a blind write — unless the choice is "none", which is silence and
+    // previews nothing.
     function setEventSound(eventName, soundId) {
         if (!root.ctl || !root.ctl.settingsReady)
             return;
         var result = root.ctl.setEventSound(eventName, soundId);
-        root.previewResult = result;
+        if (result !== eventName + " -> " + soundId) {
+            root.previewResult = result;
+            return;
+        }
+        root.previewResult = root.ctl.eventLabel(eventName) + " -> " + soundId;
         if (soundId === "none")
             return;
-        if (result === eventName + " -> " + soundId)
-            root.previewResult = root.ctl.preview(eventName);
+        var preview = root.ctl.preview(eventName);
+        root.previewResult = preview === eventName ? root.ctl.eventLabel(eventName) : preview;
     }
 
     function flipEnabled() {
@@ -229,16 +228,8 @@ Item {
         root.ctl.setVolume(next);
     }
 
-    // One-shot preview; the controller's returned string is shown verbatim.
+    // Most recent event-sound assignment or preview result.
     property string previewResult: ""
-
-    function previewEvent(index) {
-        if (!root.ctl) {
-            root.previewResult = "controller unavailable";
-            return;
-        }
-        root.previewResult = root.ctl.preview(root.previewEvents[index]);
-    }
 
     // ---- window ----------------------------------------------------------
 
@@ -346,7 +337,7 @@ Item {
                             Toggle {
                                 width: parent.width
                                 label: "Desktop sounds"
-                                description: "Window and workspace cues: windowOpened, windowClosed, workspaceSwitched."
+                                description: "Window and workspace cues: Window Opened, Window Closed, Workspace Switched."
                                 foreground: root.foreground
                                 accent: root.accent
                                 fontFamily: root.fontFamily
@@ -369,7 +360,7 @@ Item {
                             Toggle {
                                 width: parent.width
                                 label: "Notification sounds"
-                                description: "The notification cue (notificationReceived)."
+                                description: "The notification cue (Notification Received)."
                                 foreground: root.foreground
                                 accent: root.accent
                                 fontFamily: root.fontFamily
@@ -479,7 +470,7 @@ Item {
 
                             Text {
                                 textFormat: Text.PlainText
-                                text: "Choose the cue for each event from the sound catalog. Previews play the selected sound."
+                                text: "Choose the cue for each event from the sound catalog. Choosing a sound previews it."
                                 color: Qt.darker(root.foreground, 1.4)
                                 font.family: root.fontFamily
                                 font.pixelSize: Style.fontPx(0.917)
@@ -513,7 +504,7 @@ Item {
                                 Repeater {
                                     id: soundRepeater
 
-                                    model: root.previewEvents
+                                    model: root.eventIds
 
                                     Row {
                                         id: soundRow
@@ -530,11 +521,11 @@ Item {
 
                                         Text {
                                             textFormat: Text.PlainText
-                                            text: soundRow.modelData
+                                            text: root.ctl ? root.ctl.eventLabel(soundRow.modelData) : ""
                                             color: root.foreground
                                             font.family: root.fontFamily
                                             font.pixelSize: Style.fontPx(1.0)
-                                            width: 150
+                                            width: 170
                                             elide: Text.ElideRight
                                             anchors.verticalCenter: parent.verticalCenter
                                         }
@@ -542,7 +533,7 @@ Item {
                                         Dropdown {
                                             id: soundDropdown
 
-                                            width: parent.width - 150 - parent.spacing
+                                            width: parent.width - 170 - parent.spacing
                                             showLabel: false
                                             foreground: root.foreground
                                             background: root.background
@@ -566,68 +557,11 @@ Item {
                                     }
                                 }
                             }
-                        }
-
-                        PanelSeparator {
-                            foreground: root.foreground
-                        }
-
-                        // ---- previews --------------------------------------
-                        Column {
-                            width: parent.width
-                            spacing: Style.space(8)
-
-                            PanelSectionHeader {
-                                width: parent.width
-                                text: "Preview"
-                                foreground: root.foreground
-                                fontFamily: root.fontFamily
-                            }
 
                             Text {
                                 textFormat: Text.PlainText
-                                text: "One-shot previews of the exact event names the service plays. Previews ignore mute and overlap but never play while unsafe or during cooldown."
-                                color: Qt.darker(root.foreground, 1.4)
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.fontPx(0.917)
-                                width: parent.width
-                                wrapMode: Text.WordWrap
-                            }
-
-                            Grid {
-                                id: previewGrid
-                                width: parent.width
-                                columns: 2
-                                spacing: Style.space(8)
-
-                                Repeater {
-                                    model: root.previewEvents
-
-                                    Button {
-                                        required property var modelData
-                                        required property int index
-
-                                        width: (previewGrid.width - previewGrid.spacing) / 2
-                                        text: modelData
-                                        tooltipText: "Preview " + modelData
-                                        hasCursor: root.cursorActive && root.selectedIndex === root.previewStart + index
-                                        onHovered: function (h) {
-                                            if (h)
-                                                root.select(root.previewStart + index);
-                                        }
-                                        onHasCursorChanged: if (hasCursor)
-                                            root.ensureCursorVisible(this)
-                                        onClicked: {
-                                            root.select(root.previewStart + index);
-                                            root.previewEvent(index);
-                                        }
-                                    }
-                                }
-                            }
-
-                            Text {
-                                textFormat: Text.PlainText
-                                text: root.previewResult === "" ? "Press a preview button to hear an event cue." : "result: " + root.previewResult
+                                visible: root.previewResult !== ""
+                                text: "result: " + root.previewResult
                                 color: root.ctl && root.ctl.playing ? root.foreground : Qt.darker(root.foreground, 1.4)
                                 font.family: root.fontFamily
                                 font.pixelSize: Style.fontPx(0.917)
@@ -635,7 +569,6 @@ Item {
                                 wrapMode: Text.WordWrap
                             }
                         }
-
                         PanelSeparator {
                             foreground: root.foreground
                         }
@@ -707,7 +640,7 @@ Item {
 
                             Text {
                                 textFormat: Text.PlainText
-                                text: "playback: " + (root.ctlStatus ? (root.ctlStatus.playing ? "playing" + (root.ctlStatus.currentEvent ? " (" + root.ctlStatus.currentEvent + ")" : "") : "idle") + (root.ctlStatus.cooldownActive ? " · cooldown" : "") : "unavailable")
+                                text: "playback: " + (root.ctlStatus ? (root.ctlStatus.playing ? "playing" + (root.ctlStatus.currentEvent ? " (" + root.ctl.eventLabel(root.ctlStatus.currentEvent) + ")" : "") : "idle") + (root.ctlStatus.cooldownActive ? " · cooldown" : "") : "unavailable")
                                 color: Qt.darker(root.foreground, 1.4)
                                 font.family: root.fontFamily
                                 font.pixelSize: Style.fontPx(0.833)

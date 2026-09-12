@@ -9,6 +9,17 @@
 
 var EVENT_IDS = ["windowOpened", "windowClosed", "workspaceSwitched", "notificationReceived", "volumeUp", "volumeDown", "powerConnected", "powerDisconnected"]
 
+var EVENT_LABELS = {
+  windowOpened: "Window Opened",
+  windowClosed: "Window Closed",
+  workspaceSwitched: "Workspace Switched",
+  notificationReceived: "Notification Received",
+  volumeUp: "Volume Up",
+  volumeDown: "Volume Down",
+  powerConnected: "Power Connected",
+  powerDisconnected: "Power Disconnected"
+}
+
 // The four system events: volume and power-state cues driven by the session
 // bus, gated by the caller with the system adapter's readiness.
 var SYSTEM_EVENT_IDS = ["volumeUp", "volumeDown", "powerConnected", "powerDisconnected"]
@@ -187,6 +198,60 @@ function isNotificationEvent(name) {
 
 function isSystemEvent(name) {
   return SYSTEM_EVENT_IDS.indexOf(String(name || "")) !== -1
+}
+
+// Human-readable event names for UI display (issue #9): "windowOpened"
+// shows as "Window Opened". The serialized ids and IPC surface stay
+// camelCase; this is a presentation-only mapping with an exact entry per
+// EVENT_IDS member and "" for anything else, so an unknown id can never
+// leak into a label slot.
+function eventLabel(name) {
+  return EVENT_LABELS[String(name || "")] || ""
+}
+
+// Omarchy 4.0.3 capability-scopes third-party plugin shell access, so Chime
+// cannot traverse the host's private service map. These parsers consume the
+// supported persisted/IPC state surfaces and fail closed on partial,
+// malformed, or unknown responses.
+function parseDndState(text) {
+  try {
+    var parsed = JSON.parse(String(text || ""))
+    if (!parsed || typeof parsed !== "object" || typeof parsed.dnd !== "boolean")
+      return { valid: false, active: false }
+    return { valid: true, active: parsed.dnd }
+  } catch (e) {
+    return { valid: false, active: false }
+  }
+}
+
+function parseLockState(text) {
+  var value = String(text || "").trim()
+  if (value === "true")
+    return { valid: true, active: true }
+  if (value === "false")
+    return { valid: true, active: false }
+  return { valid: false, active: false }
+}
+
+function parseIdleState(text) {
+  try {
+    var parsed = JSON.parse(String(text || ""))
+    if (!parsed || typeof parsed !== "object"
+        || typeof parsed.idle !== "boolean"
+        || typeof parsed.inIdleCycle !== "boolean"
+        || typeof parsed.screensaverStarted !== "boolean"
+        || typeof parsed.screensaverWindows !== "number"
+        || !isFinite(parsed.screensaverWindows)
+        || parsed.screensaverWindows < 0)
+      return { valid: false, active: false }
+    return {
+      valid: true,
+      active: parsed.idle || parsed.inIdleCycle
+        || parsed.screensaverStarted || parsed.screensaverWindows > 0
+    }
+  } catch (e) {
+    return { valid: false, active: false }
+  }
 }
 
 function assetPath(eventName) {
