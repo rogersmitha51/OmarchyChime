@@ -1,10 +1,10 @@
-// Omarchy Chime settings panel. Binds the controller's live truth, offers
-// per-event sound selection from the catalog (issue #7) with an audible
-// preview on each choice, and reactive diagnostics. Lifecycle follows the
-// shell panel contract (open/close flip the FloatingWindow, user close
-// reports via shell.hide). One flat cursor: 3 toggles, volume slider, and
-// 8 event sound dropdowns; Tab/j/k traverse, h/l adjusts volume,
-// Enter/Space activate, Esc closes, hover shares it.
+// Omarchy Chime settings panel. Binds the controller's live truth, offers a
+// whole-theme selector plus per-event sound selection with audible previews,
+// and reactive diagnostics. Lifecycle follows the shell panel contract
+// (open/close flip the FloatingWindow, user close reports via shell.hide).
+// One flat cursor: 3 toggles, volume slider, theme pack, and 8 event sound
+// dropdowns; Tab/j/k traverse, h/l adjusts volume, Enter/Space activate,
+// Esc closes, hover shares it.
 
 pragma ComponentBehavior: Bound
 
@@ -69,7 +69,7 @@ Item {
     // openPanelIds map stays consistent and toggle works next time.
     function requestClose() {
         if (root.shell && typeof root.shell.hide === "function")
-            root.shell.hide("nick.chime");
+            root.shell.hide("omarchychime.sounds");
         else
             window.visible = false;
     }
@@ -93,16 +93,17 @@ Item {
         readonly property int barSize: 26
     }
 
-    // One cursor over 12 targets: 0..2 toggles, 3 volume, 4..11 event sound
-    // dropdowns.
+    // One cursor over 13 targets: 0..2 toggles, 3 volume, 4 theme pack,
+    // 5..12 event sound dropdowns.
     property bool cursorActive: false
     property int selectedIndex: 0
 
     readonly property var eventIds: ["windowOpened", "windowClosed", "workspaceSwitched", "notificationReceived", "volumeUp", "volumeDown", "powerConnected", "powerDisconnected"]
 
-    readonly property int targetCount: 12
+    readonly property int targetCount: 13
     readonly property int sliderIndex: 3
-    readonly property int soundStart: 4
+    readonly property int themePackIndex: 4
+    readonly property int soundStart: 5
     // Mouse hover and keyboard share one cursor; select() is the single
     // write point and clamps in bounds.
     function select(index) {
@@ -151,9 +152,38 @@ Item {
                 root.flipNotifications();
             return;
         }
-        // Volume slider (3) and event sound dropdowns (4..11): activation
-        // is a no-op — the dropdowns open their popup directly.
+        // Volume slider (3), theme pack (4), and event sound dropdowns
+        // (5..12): activation is a no-op — dropdowns own activation.
     }
+    function themePackOptions() {
+        var ctl = root.ctl;
+        if (!ctl || !ctl.themePackIds)
+            return [];
+        var out = [{
+            value: ctl.themePackCustomId,
+            label: "Custom"
+        }];
+        for (var i = 0; i < ctl.themePackIds.length; i++) {
+            var id = ctl.themePackIds[i];
+            out.push({
+                value: id,
+                label: ctl.themePackLabels[id] || id
+            });
+        }
+        return out;
+    }
+
+    function setThemePack(packId) {
+        if (!root.ctl || !root.ctl.settingsReady || packId === root.ctl.themePackCustomId)
+            return;
+        var result = root.ctl.setThemePack(packId);
+        root.previewResult = result;
+        if (result !== "theme pack -> " + packId)
+            return;
+        var preview = root.ctl.preview("notificationReceived");
+        root.previewResult = preview === "notificationReceived" ? result : result + " (" + preview + ")";
+    }
+
     // Options for one event's sound dropdown: the whole catalog, labels
     // shown, ids emitted. Rebuilt per row from the controller's catalog.
     function soundOptions() {
@@ -243,7 +273,7 @@ Item {
 
         onVisibleChanged: {
             if (!visible && !root.closingFromHost && root.shell && typeof root.shell.hide === "function")
-                root.shell.hide("nick.chime");
+                root.shell.hide("omarchychime.sounds");
         }
 
         FocusScope {
@@ -255,9 +285,9 @@ Item {
                 id: keyCatcher
                 anchors.fill: parent
 
-                // An open event-sound dropdown owns the keys (search field +
-                // result list): all keys forward to it, none drive the cursor.
-                blocked: soundGrid.popupOpen
+                // An open dropdown owns the keys (search field + result list):
+                // all keys forward to it, none drive the cursor.
+                blocked: soundSection.popupOpen
 
                 onMoveRequested: function (dx, dy) {
                     if (dy !== 0) {
@@ -456,26 +486,77 @@ Item {
                             foreground: root.foreground
                         }
 
-                        // ---- event sounds (issue #7) -----------------------
+                        // ---- theme pack and event sounds -------------------
                         Column {
+                            id: soundSection
+
                             width: parent.width
                             spacing: Style.space(8)
+                            readonly property bool popupOpen: themePackDropdown.popupOpen || soundGrid.popupOpen
+
+                            PanelSectionHeader {
+                                width: parent.width
+                                text: "Sound theme"
+                                foreground: root.foreground
+                                fontFamily: root.fontFamily
+                            }
+
+                            Row {
+                                width: parent.width
+                                spacing: Style.space(10)
+
+                                Text {
+                                    textFormat: Text.PlainText
+                                    text: "Theme pack"
+                                    color: root.foreground
+                                    font.family: root.fontFamily
+                                    font.pixelSize: Style.fontPx(1.0)
+                                    width: 170
+                                    elide: Text.ElideRight
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+
+                                Dropdown {
+                                    id: themePackDropdown
+
+                                    width: parent.width - 170 - parent.spacing
+                                    showLabel: false
+                                    foreground: root.foreground
+                                    background: root.background
+                                    accent: root.accent
+                                    fontFamily: root.fontFamily
+                                    options: root.themePackOptions()
+                                    value: root.ctl ? root.ctl.themePack : ""
+                                    enabled: root.settingsWritable
+                                    opacity: root.settingsWritable ? 1.0 : 0.5
+                                    hasCursor: root.cursorActive && root.selectedIndex === root.themePackIndex
+                                    onHovered: function (h) {
+                                        if (h)
+                                            root.select(root.themePackIndex);
+                                    }
+                                    onHasCursorChanged: if (hasCursor)
+                                        root.ensureCursorVisible(this)
+                                    onChanged: function (v) {
+                                        root.setThemePack(v);
+                                    }
+                                }
+                            }
+
+                            Text {
+                                textFormat: Text.PlainText
+                                text: "A theme replaces all eight cues at once. Change an event below to create a custom mix."
+                                color: Qt.darker(root.foreground, 1.4)
+                                font.family: root.fontFamily
+                                font.pixelSize: Style.fontPx(0.917)
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                            }
 
                             PanelSectionHeader {
                                 width: parent.width
                                 text: "Event sounds"
                                 foreground: root.foreground
                                 fontFamily: root.fontFamily
-                            }
-
-                            Text {
-                                textFormat: Text.PlainText
-                                text: "Choose the cue for each event from the sound catalog. Choosing a sound previews it."
-                                color: Qt.darker(root.foreground, 1.4)
-                                font.family: root.fontFamily
-                                font.pixelSize: Style.fontPx(0.917)
-                                width: parent.width
-                                wrapMode: Text.WordWrap
                             }
 
                             Column {
@@ -511,9 +592,6 @@ Item {
 
                                         required property var modelData
                                         required property int index
-
-                                        // True while this row's dropdown popup
-                                        // is open; the grid aggregates these.
                                         readonly property bool popupOpen: soundDropdown.popupOpen
 
                                         width: parent.width

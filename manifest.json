@@ -1,10 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "nick.chime",
+  "id": "omarchychime.sounds",
   "name": "Omarchy Chime",
   "version": "0.3.0",
-  "author": "Omarchy",
-  "description": "Desktop-sounds 0.3.0 candidate: window open/close, workspace switches, volume up/down, power connect/disconnect, and universal notification cues (one per newly accepted non-suppressed notification), per-event sound selection from the sound catalog, mute, volume, and previews.",
+  "author": "Roger Smith A51",
+  "license": "MIT",
+  "description": "Desktop sounds for windows, workspaces, volume, power, and notifications, with selectable sound packs.",
   "kinds": [
     "service",
     "panel",

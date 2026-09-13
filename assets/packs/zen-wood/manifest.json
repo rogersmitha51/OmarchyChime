@@ -1,0 +1,102 @@
+{
+  "name": "Zen Wood",
+  "description": "Warm organic wooden mallet cues with restrained natural decay.",
+  "source": {
+    "method": "deterministic additive synthesis",
+    "provenance": "Original deterministic additive synthesis; no external source recordings."
+  },
+  "license": {
+    "name": "MIT",
+    "file": "../../../LICENSE"
+  },
+  "audio_format": {
+    "container": "WAV",
+    "codec": "signed 16-bit PCM",
+    "channels": 1,
+    "sample_rate_hz": 44100
+  },
+  "mastering": {
+    "active_region_definition": "First through last sample at or above -50 dBFS.",
+    "nominal_active_rms_targets_dbfs": {
+      "notification_and_power": -18.0,
+      "volume": -18.5,
+      "window_and_workspace": -21.5
+    },
+    "target_adjustment": "Up to 1.25 dB where needed to keep sample peaks inside the event-role range.",
+    "ending": "10 ms fade followed by digital silence; overlong cues trimmed to the guideline maximum."
+  },
+  "cues": {
+    "notification-received": {
+      "file": "notification-received.wav",
+      "duration_seconds": 0.88,
+      "sample_peak_dbfs": -4.98,
+      "true_peak_dbtp": -4.98,
+      "whole_file_rms_dbfs": -20.1,
+      "active_region_rms_dbfs": -18.0,
+      "crest_factor_db": 13.02
+    },
+    "power-connected": {
+      "file": "power-connected.wav",
+      "duration_seconds": 0.76,
+      "sample_peak_dbfs": -5.22,
+      "true_peak_dbtp": -5.22,
+      "whole_file_rms_dbfs": -20.24,
+      "active_region_rms_dbfs": -18.0,
+      "crest_factor_db": 12.78
+    },
+    "power-disconnected": {
+      "file": "power-disconnected.wav",
+      "duration_seconds": 0.76,
+      "sample_peak_dbfs": -5.11,
+      "true_peak_dbtp": -5.11,
+      "whole_file_rms_dbfs": -20.21,
+      "active_region_rms_dbfs": -18.0,
+      "crest_factor_db": 12.89
+    },
+    "volume-down": {
+      "file": "volume-down.wav",
+      "duration_seconds": 0.25,
+      "sample_peak_dbfs": -5.15,
+      "true_peak_dbtp": -5.15,
+      "whole_file_rms_dbfs": -22.35,
+      "active_region_rms_dbfs": -18.5,
+      "crest_factor_db": 13.35
+    },
+    "volume-up": {
+      "file": "volume-up.wav",
+      "duration_seconds": 0.25,
+      "sample_peak_dbfs": -5.43,
+      "true_peak_dbtp": -5.43,
+      "whole_file_rms_dbfs": -22.33,
+      "active_region_rms_dbfs": -18.5,
+      "crest_factor_db": 13.07
+    },
+    "window-closed": {
+      "file": "window-closed.wav",
+      "duration_seconds": 0.45,
+      "sample_peak_dbfs": -9.07,
+      "true_peak_dbtp": -9.06,
+      "whole_file_rms_dbfs": -22.95,
+      "active_region_rms_dbfs": -21.5,
+      "crest_factor_db": 12.44
+    },
+    "window-opened": {
+      "file": "window-opened.wav",
+      "duration_seconds": 0.45,
+      "sample_peak_dbfs": -9.03,
+      "true_peak_dbtp": -9.02,
+      "whole_file_rms_dbfs": -22.65,
+      "active_region_rms_dbfs": -21.5,
+      "crest_factor_db": 12.47
+    },
+    "workspace-switched": {
+      "file": "workspace-switched.wav",
+      "duration_seconds": 0.27,
+      "sample_peak_dbfs": -8.67,
+      "true_peak_dbtp": -8.67,
+      "whole_file_rms_dbfs": -25.9,
+      "active_region_rms_dbfs": -21.5,
+      "crest_factor_db": 12.83
+    }
+  }
+}

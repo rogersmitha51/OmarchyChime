@@ -23,13 +23,15 @@ var EVENT_LABELS = {
 // The four system events: volume and power-state cues driven by the session
 // bus, gated by the caller with the system adapter's readiness.
 var SYSTEM_EVENT_IDS = ["volumeUp", "volumeDown", "powerConnected", "powerDisconnected"]
+var VOLUME_EVENT_IDS = ["volumeUp", "volumeDown"]
 
 var ASSET_DIR = "/usr/share/sounds/freedesktop/stereo/"
+var PACK_ASSET_DIR = "assets/packs/"
 
-// The plugin's local cue asset; ChimeController resolves relative catalog
-// paths through Qt.resolvedUrl (decoded file URL) so playback never depends
-// on the host shell's working directory. Theme entries are absolute paths
-// and need no resolution.
+// The plugin's original local cue asset. ChimeController resolves relative
+// catalog paths through Qt.resolvedUrl (decoded file URL) so playback never
+// depends on the host shell's working directory. Freedesktop entries are
+// absolute paths and need no resolution.
 var NOTIFICATION_ASSET = "assets/agent-needs-input.wav"
 
 // The selectable sound catalog (issue #7): every cue a user can assign to
@@ -91,15 +93,61 @@ var SOUND_IDS = [
   "service-login",
   "service-logout",
   "suspend-error",
-  "trash-empty",
-  "none"
+  "trash-empty"
 ]
 
-// Per-event default sound ids: exactly the cues 0.3.0 played before
-// selection existed, so a v3 migration is audibly identical to the previous
-// candidate (power-plug.oga and power-unplug.oga are theme symlinks of
-// device-added.oga and device-removed.oga, hence the canonical ids here).
-var EVENT_DEFAULT_SOUNDS = {
+// Bundled theme packs use one cue per event. Their ids are derived from the
+// stable pack id and event id, while paths follow the asset filenames.
+// "system" remains the freedesktop assignment; "custom" is presentation
+// state only and is never a writable pack.
+var THEME_PACK_IDS = [
+  "system",
+  "zen-wood",
+  "ceramic-drop",
+  "kalimba",
+  "deep-resonance",
+  "sonar",
+  "retro-hacker"
+]
+var THEME_PACK_LABELS = {
+  system: "System default",
+  "zen-wood": "Zen Wood",
+  "ceramic-drop": "Ceramic Drop",
+  kalimba: "Kalimba",
+  "deep-resonance": "Deep Resonance",
+  sonar: "Sonar",
+  "retro-hacker": "Retro Hacker"
+}
+var THEME_PACK_CUSTOM = "custom"
+var DEFAULT_THEME_PACK_ID = "retro-hacker"
+var EVENT_ASSET_NAMES = {
+  windowOpened: "window-opened",
+  windowClosed: "window-closed",
+  workspaceSwitched: "workspace-switched",
+  notificationReceived: "notification-received",
+  volumeUp: "volume-up",
+  volumeDown: "volume-down",
+  powerConnected: "power-connected",
+  powerDisconnected: "power-disconnected"
+}
+
+for (var packIndex = 1; packIndex < THEME_PACK_IDS.length; packIndex++) {
+  var packId = THEME_PACK_IDS[packIndex]
+  for (var eventIndex = 0; eventIndex < EVENT_IDS.length; eventIndex++) {
+    var packEvent = EVENT_IDS[eventIndex]
+    var soundId = packId + ":" + packEvent
+    SOUND_CATALOG[soundId] = {
+      path: PACK_ASSET_DIR + packId + "/" + EVENT_ASSET_NAMES[packEvent] + ".wav",
+      label: THEME_PACK_LABELS[packId] + " — " + EVENT_LABELS[packEvent]
+    }
+    SOUND_IDS.push(soundId)
+  }
+}
+SOUND_IDS.push(SOUND_NONE)
+
+// Keep the selectable System default independent from the plugin default so
+// users can explicitly return to the freedesktop cues.
+var SYSTEM_EVENT_SOUNDS = {
   windowOpened: "device-added",
   windowClosed: "device-removed",
   workspaceSwitched: "audio-volume-change",
@@ -110,6 +158,12 @@ var EVENT_DEFAULT_SOUNDS = {
   powerDisconnected: "device-removed"
 }
 
+var EVENT_DEFAULT_SOUNDS = {}
+for (var defaultEventIndex = 0; defaultEventIndex < EVENT_IDS.length; defaultEventIndex++) {
+  var defaultEvent = EVENT_IDS[defaultEventIndex]
+  EVENT_DEFAULT_SOUNDS[defaultEvent] = DEFAULT_THEME_PACK_ID + ":" + defaultEvent
+}
+
 var DEFAULT_SETTINGS = {
   enabled: true,
   volume: 0.35,
@@ -117,19 +171,61 @@ var DEFAULT_SETTINGS = {
   notificationsEnabled: false
 }
 
-// Default per-event sound assignment: the catalog ids of the cues this
-// plugin has always played (see EVENT_DEFAULT_SOUNDS).
-function defaultEventSounds() {
-  return {
-    windowOpened: EVENT_DEFAULT_SOUNDS.windowOpened,
-    windowClosed: EVENT_DEFAULT_SOUNDS.windowClosed,
-    workspaceSwitched: EVENT_DEFAULT_SOUNDS.workspaceSwitched,
-    notificationReceived: EVENT_DEFAULT_SOUNDS.notificationReceived,
-    volumeUp: EVENT_DEFAULT_SOUNDS.volumeUp,
-    volumeDown: EVENT_DEFAULT_SOUNDS.volumeDown,
-    powerConnected: EVENT_DEFAULT_SOUNDS.powerConnected,
-    powerDisconnected: EVENT_DEFAULT_SOUNDS.powerDisconnected
+function copyEventSounds(source) {
+  var sounds = {}
+  for (var i = 0; i < EVENT_IDS.length; i++) {
+    var eventName = EVENT_IDS[i]
+    sounds[eventName] = source[eventName]
   }
+  return sounds
+}
+
+// Return a fresh default assignment so callers never share mutable state.
+function defaultEventSounds() {
+  return copyEventSounds(EVENT_DEFAULT_SOUNDS)
+}
+
+// Return a fresh complete assignment for a selectable pack. Callers can
+// replace the settings map atomically without sharing mutable pack state.
+function themePackSounds(packId) {
+  var id = String(packId || "")
+  if (id === "system")
+    return copyEventSounds(SYSTEM_EVENT_SOUNDS)
+  if (THEME_PACK_IDS.indexOf(id) < 1)
+    return null
+  var sounds = {}
+  for (var i = 0; i < EVENT_IDS.length; i++) {
+    var eventName = EVENT_IDS[i]
+    sounds[eventName] = id + ":" + eventName
+  }
+  return sounds
+}
+
+// Exact pack detection keeps per-event edits visible as "Custom". Settings
+// are complete and validated before reaching the UI, but this helper remains
+// strict so a partial or stale map is never mislabeled as a pack.
+function themePackId(sounds) {
+  if (!sounds || typeof sounds !== "object" || Array.isArray(sounds))
+    return THEME_PACK_CUSTOM
+  for (var i = 0; i < THEME_PACK_IDS.length; i++) {
+    var id = THEME_PACK_IDS[i]
+    var expected = themePackSounds(id)
+    var matches = true
+    for (var j = 0; j < EVENT_IDS.length; j++) {
+      var eventName = EVENT_IDS[j]
+      if (sounds[eventName] !== expected[eventName]) {
+        matches = false
+        break
+      }
+    }
+    if (matches)
+      return id
+  }
+  return THEME_PACK_CUSTOM
+}
+
+function isValidThemePack(packId) {
+  return THEME_PACK_IDS.indexOf(String(packId || "")) !== -1
 }
 
 var SETTINGS_VERSION = 4
@@ -159,10 +255,9 @@ function catalogSound(soundId) {
 }
 
 // The playable path for an event under a settings "sounds" map. Falls back
-// to the event's default cue when the event is unknown or its sound id is
-// not in the catalog — a stale or hand-edited map must fail safe to the
-// stock cue, never to silence or an arbitrary file. The explicit "none"
-// assignment is silence: an empty path, never a fallback to the default.
+// to the Retro Hacker plugin default when an assignment is missing or stale,
+// never to silence or an arbitrary file. The explicit "none" assignment is
+// silence: an empty path, never a fallback to the default.
 function eventSoundPath(eventName, sounds) {
   var id = sounds ? sounds[eventName] : ""
   if (id === SOUND_NONE)
@@ -198,6 +293,10 @@ function isNotificationEvent(name) {
 
 function isSystemEvent(name) {
   return SYSTEM_EVENT_IDS.indexOf(String(name || "")) !== -1
+}
+
+function isVolumeEvent(name) {
+  return VOLUME_EVENT_IDS.indexOf(String(name || "")) !== -1
 }
 
 // Human-readable event names for UI display (issue #9): "windowOpened"

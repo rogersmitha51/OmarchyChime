@@ -1,7 +1,7 @@
 // Omarchy Chime — desktop event sounds, system volume/power cues, and
 // notification cues.
 //
-// Independent service plugin (nick.chime). This file is a small composition
+// Independent service plugin (omarchychime.sounds). This file is a small composition
 // root only: it wires the ChimeController (audio/settings), DesktopEvents
 // (window/workspace adapter), SystemEvents (volume/power adapter), and
 // NotificationEvents (passive notification observer) slices together,
@@ -346,6 +346,21 @@ Item {
             return controller.setNotificationsEnabled(v === "on");
         }
 
+        function pack(value: string): string {
+            var id = String(value || "").trim();
+            if (id === "")
+                return "theme pack -> " + controller.themePack;
+            return controller.setThemePack(id);
+        }
+
+        function packs(): string {
+            var ids = controller.themePackIds || [];
+            var out = "theme packs:";
+            for (var i = 0; i < ids.length; i++)
+                out += " " + ids[i];
+            return out;
+        }
+
         // Issue #7: per-event sound assignment. `sound <event> <soundId>`
         // assigns; `sound` alone lists every event's current assignment;
         // `sounds` lists the catalog.
@@ -375,7 +390,7 @@ Item {
         }
 
         function help(): string {
-            return "chime commands: status, mute, unmute, volume <0-1>, desktop on|off, notifications on|off, sound <event> <soundId>, sounds, sound <event>, preview <eventName>, help";
+            return "chime commands: status, mute, unmute, volume <0-1>, desktop on|off, notifications on|off, pack <themePackId>, packs, sound <event> <soundId>, sounds, sound <event>, preview <eventName>, help";
         }
     }
 
@@ -392,7 +407,7 @@ Item {
 
     function statusJson() {
         return JSON.stringify({
-            plugin: "nick.chime",
+            plugin: "omarchychime.sounds",
             version: "0.3.0",
             safety: {
                 ready: service.safetyReady,

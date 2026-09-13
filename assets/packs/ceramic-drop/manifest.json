@@ -1,0 +1,102 @@
+{
+  "name": "Ceramic Drop",
+  "description": "Muted porcelain taps with short, delicate resonance.",
+  "source": {
+    "method": "deterministic additive synthesis",
+    "provenance": "Original deterministic additive synthesis; no external source recordings."
+  },
+  "license": {
+    "name": "MIT",
+    "file": "../../../LICENSE"
+  },
+  "audio_format": {
+    "container": "WAV",
+    "codec": "signed 16-bit PCM",
+    "channels": 1,
+    "sample_rate_hz": 44100
+  },
+  "mastering": {
+    "active_region_definition": "First through last sample at or above -50 dBFS.",
+    "nominal_active_rms_targets_dbfs": {
+      "notification_and_power": -18.0,
+      "volume": -18.5,
+      "window_and_workspace": -21.5
+    },
+    "target_adjustment": "Up to 1.25 dB where needed to keep sample peaks inside the event-role range.",
+    "ending": "10 ms fade followed by digital silence; overlong cues trimmed to the guideline maximum."
+  },
+  "cues": {
+    "notification-received": {
+      "file": "notification-received.wav",
+      "duration_seconds": 0.82,
+      "sample_peak_dbfs": -4.12,
+      "true_peak_dbtp": -4.12,
+      "whole_file_rms_dbfs": -20.29,
+      "active_region_rms_dbfs": -18.0,
+      "crest_factor_db": 13.88
+    },
+    "power-connected": {
+      "file": "power-connected.wav",
+      "duration_seconds": 0.699977,
+      "sample_peak_dbfs": -4.17,
+      "true_peak_dbtp": -4.17,
+      "whole_file_rms_dbfs": -20.29,
+      "active_region_rms_dbfs": -18.0,
+      "crest_factor_db": 13.83
+    },
+    "power-disconnected": {
+      "file": "power-disconnected.wav",
+      "duration_seconds": 0.699977,
+      "sample_peak_dbfs": -4.92,
+      "true_peak_dbtp": -4.91,
+      "whole_file_rms_dbfs": -20.27,
+      "active_region_rms_dbfs": -18.0,
+      "crest_factor_db": 13.08
+    },
+    "volume-down": {
+      "file": "volume-down.wav",
+      "duration_seconds": 0.23,
+      "sample_peak_dbfs": -5.13,
+      "true_peak_dbtp": -5.13,
+      "whole_file_rms_dbfs": -22.73,
+      "active_region_rms_dbfs": -18.5,
+      "crest_factor_db": 13.37
+    },
+    "volume-up": {
+      "file": "volume-up.wav",
+      "duration_seconds": 0.23,
+      "sample_peak_dbfs": -5.18,
+      "true_peak_dbtp": -5.17,
+      "whole_file_rms_dbfs": -23.02,
+      "active_region_rms_dbfs": -18.85,
+      "crest_factor_db": 13.67
+    },
+    "window-closed": {
+      "file": "window-closed.wav",
+      "duration_seconds": 0.45,
+      "sample_peak_dbfs": -8.86,
+      "true_peak_dbtp": -8.86,
+      "whole_file_rms_dbfs": -23.43,
+      "active_region_rms_dbfs": -21.5,
+      "crest_factor_db": 12.64
+    },
+    "window-opened": {
+      "file": "window-opened.wav",
+      "duration_seconds": 0.45,
+      "sample_peak_dbfs": -8.08,
+      "true_peak_dbtp": -8.07,
+      "whole_file_rms_dbfs": -23.21,
+      "active_region_rms_dbfs": -21.5,
+      "crest_factor_db": 13.42
+    },
+    "workspace-switched": {
+      "file": "workspace-switched.wav",
+      "duration_seconds": 0.25,
+      "sample_peak_dbfs": -7.95,
+      "true_peak_dbtp": -7.95,
+      "whole_file_rms_dbfs": -26.05,
+      "active_region_rms_dbfs": -21.5,
+      "crest_factor_db": 13.55
+    }
+  }
+}

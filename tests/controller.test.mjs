@@ -5,10 +5,9 @@
 //
 // These defend observable contracts: the strict complete v4 settings schema
 // (version plus all five typed, bounded fields, the sounds map requiring
-// every event mapped to a catalog sound id), v3 migration (every existing
-// field preserved, the sounds map seeded with the cues 0.3.0 played), v2
-// migration (agentInputEnabled carried over verbatim into
-// notificationsEnabled), safe v1 migration (notifications off), invalid
+// every event mapped to a catalog sound id), older-schema migration to the
+// current Retro Hacker default (with v2 agentInputEnabled carried over
+// verbatim into notificationsEnabled and safe v1 notifications-off behavior),
 // reload preservation (mute must survive a malformed file), the
 // persisted-settings roundtrip feeding playback eligibility, the generic
 // notification event naming with no agent-named aliases left in the public
@@ -247,7 +246,7 @@ test("persisted per-event sounds survive serialize -> parse and drive resolution
   assert.equal(Logic.eventSoundPath("notificationReceived", parsed.settings.sounds), ASSET_DIR + "bell.oga")
   assert.equal(Logic.eventSoundPath("windowOpened", parsed.settings.sounds), ASSET_DIR + "complete.oga")
   // Untouched events keep their defaults.
-  assert.equal(Logic.eventSoundPath("powerConnected", parsed.settings.sounds), ASSET_DIR + "device-added.oga")
+  assert.equal(Logic.eventSoundPath("powerConnected", parsed.settings.sounds), "assets/packs/retro-hacker/power-connected.wav")
 })
 
 test("a none assignment persists, stays valid, and resolves to silence", () => {
@@ -261,7 +260,7 @@ test("a none assignment persists, stays valid, and resolves to silence", () => {
   assert.equal(Logic.eventSoundPath("volumeUp", parsed.settings.sounds), "")
   assert.equal(Logic.eventSoundPath("notificationReceived", parsed.settings.sounds), "")
   // Unrelated events keep their default cue.
-  assert.equal(Logic.eventSoundPath("windowOpened", parsed.settings.sounds), ASSET_DIR + "device-added.oga")
+  assert.equal(Logic.eventSoundPath("windowOpened", parsed.settings.sounds), "assets/packs/retro-hacker/window-opened.wav")
   // "none" is never treated as stale by the id helper.
   assert.equal(Logic.eventSoundId("volumeUp", parsed.settings.sounds), "none")
 })
@@ -336,9 +335,16 @@ test("the four system events are classified as system events, and the notificati
     assert.equal(Logic.isNotificationEvent(bad), false, String(bad))
 })
 
+test("volume events are identified for rapid-cue coalescing", () => {
+  assert.equal(Logic.isVolumeEvent("volumeUp"), true)
+  assert.equal(Logic.isVolumeEvent("volumeDown"), true)
+  for (const name of ["windowOpened", "powerConnected", "notificationReceived", "", null])
+    assert.equal(Logic.isVolumeEvent(name), false, String(name))
+})
+
 // ---------------------------------------------------------- sound catalog
 
-test("the catalog exposes every installed distinct freedesktop sound plus the local asset", () => {
+test("the catalog exposes freedesktop sounds, bundled packs, and silence", () => {
   // Every catalog entry resolves: id, label; every entry except "none" has
   // a playable path.
   for (const id of Logic.SOUND_IDS) {
@@ -348,17 +354,49 @@ test("the catalog exposes every installed distinct freedesktop sound plus the lo
       assert.ok(entry.path !== "", id + " has a path")
     assert.ok(entry.label !== "", id + " has a label")
   }
-  // The theme entries are the distinct .oga files of the installed theme
-  // (18 after symlink canonicalization), plus the one local plugin asset,
-  // plus the "none" silence option.
-  assert.equal(Logic.SOUND_IDS.length, 20)
+  // 19 stock/local cues + 6 packs × 8 events + silence.
+  assert.equal(Logic.SOUND_IDS.length, 68)
   assert.ok(Logic.SOUND_IDS.indexOf("agent-needs-input") !== -1)
+  assert.ok(Logic.SOUND_IDS.indexOf("zen-wood:windowOpened") !== -1)
+  assert.ok(Logic.SOUND_IDS.indexOf("sonar:notificationReceived") !== -1)
+  assert.ok(Logic.SOUND_IDS.indexOf("retro-hacker:powerDisconnected") !== -1)
   assert.ok(Logic.SOUND_IDS.indexOf("none") !== -1)
   assert.equal(Logic.SOUND_CATALOG.none.path, "")
-  // Symlink aliases of the theme are not separate catalog entries: their
-  // canonical target is.
+  // Symlink aliases of the freedesktop theme are not separate entries.
   for (const alias of ["power-plug", "power-unplug", "dialog-error", "window-attention", "window-question", "screen-capture", "network-connectivity-established", "network-connectivity-lost"])
     assert.equal(Logic.SOUND_IDS.indexOf(alias), -1, alias + " is a symlink alias, not a catalog id")
+})
+
+test("theme packs produce complete assignments and exact detection reports custom mixes", () => {
+  assert.deepEqual(plain(Logic.THEME_PACK_IDS), [
+    "system",
+    "zen-wood",
+    "ceramic-drop",
+    "kalimba",
+    "deep-resonance",
+    "sonar",
+    "retro-hacker",
+  ])
+  assert.equal(Logic.DEFAULT_THEME_PACK_ID, "retro-hacker")
+  assert.deepEqual(plain(Logic.defaultEventSounds()), plain(Logic.themePackSounds("retro-hacker")))
+  assert.notDeepEqual(plain(Logic.defaultEventSounds()), plain(Logic.themePackSounds("system")))
+  for (const packId of Logic.THEME_PACK_IDS) {
+    assert.equal(Logic.isValidThemePack(packId), true)
+    const sounds = Logic.themePackSounds(packId)
+    assert.deepEqual(Object.keys(sounds), ALL_EVENTS)
+    for (const eventName of ALL_EVENTS)
+      assert.equal(Logic.isValidSound(sounds[eventName]), true, packId + " " + eventName)
+    assert.equal(Logic.themePackId(sounds), packId)
+  }
+
+  const zenWood = Logic.themePackSounds("zen-wood")
+  assert.equal(Logic.eventSoundPath("windowOpened", zenWood), "assets/packs/zen-wood/window-opened.wav")
+  assert.equal(Logic.eventSoundPath("notificationReceived", zenWood), "assets/packs/zen-wood/notification-received.wav")
+  assert.equal(Logic.themePackId({ ...zenWood, windowOpened: "bell" }), "custom")
+  assert.equal(Logic.themePackId({}), "custom")
+  assert.equal(Logic.themePackSounds("custom"), null)
+  assert.equal(Logic.themePackSounds("missing"), null)
+  assert.equal(Logic.isValidThemePack("custom"), false)
 })
 
 test("isValidSound accepts catalog ids and rejects everything else", () => {
@@ -372,14 +410,12 @@ test("isValidSound accepts catalog ids and rejects everything else", () => {
 test("eventSoundPath resolves the assigned sound and falls back to the event default", () => {
   const sounds = { ...Logic.defaultEventSounds(), notificationReceived: "phone-incoming-call" }
   assert.equal(Logic.eventSoundPath("notificationReceived", sounds), ASSET_DIR + "phone-incoming-call.oga")
-  assert.equal(Logic.eventSoundPath("windowOpened", sounds), ASSET_DIR + "device-added.oga")
-  // A stale id (sound removed from the catalog) fails safe to the default.
-  assert.equal(Logic.eventSoundPath("windowClosed", { windowClosed: "deleted-sound" }), ASSET_DIR + "device-removed.oga")
-  assert.equal(Logic.eventSoundPath("windowClosed", null), ASSET_DIR + "device-removed.oga")
+  assert.equal(Logic.eventSoundPath("windowOpened", sounds), "assets/packs/retro-hacker/window-opened.wav")
+  // A stale id (sound removed from the catalog) fails safe to Retro Hacker.
+  assert.equal(Logic.eventSoundPath("windowClosed", { windowClosed: "deleted-sound" }), "assets/packs/retro-hacker/window-closed.wav")
+  assert.equal(Logic.eventSoundPath("windowClosed", null), "assets/packs/retro-hacker/window-closed.wav")
   assert.equal(Logic.eventSoundPath("unknownEvent", sounds), "")
-  // The notification default is the relative local asset (resolved by the
-  // controller through Qt.resolvedUrl).
-  assert.equal(Logic.eventSoundPath("notificationReceived", null), "assets/agent-needs-input.wav")
+  assert.equal(Logic.eventSoundPath("notificationReceived", null), "assets/packs/retro-hacker/notification-received.wav")
   // The explicit "none" assignment is silence: an empty path, never a
   // fallback to the event default — and never confused with a stale id.
   assert.equal(Logic.eventSoundPath("windowOpened", { ...sounds, windowOpened: "none" }), "")
@@ -390,9 +426,9 @@ test("eventSoundPath resolves the assigned sound and falls back to the event def
 test("eventSoundId returns the assignment or the event default, never a stale id", () => {
   const sounds = { ...Logic.defaultEventSounds(), workspaceSwitched: "bell" }
   assert.equal(Logic.eventSoundId("workspaceSwitched", sounds), "bell")
-  assert.equal(Logic.eventSoundId("windowOpened", sounds), "device-added")
-  assert.equal(Logic.eventSoundId("windowOpened", { windowOpened: "stale" }), "device-added")
-  assert.equal(Logic.eventSoundId("windowOpened", null), "device-added")
+  assert.equal(Logic.eventSoundId("windowOpened", sounds), "retro-hacker:windowOpened")
+  assert.equal(Logic.eventSoundId("windowOpened", { windowOpened: "stale" }), "retro-hacker:windowOpened")
+  assert.equal(Logic.eventSoundId("windowOpened", null), "retro-hacker:windowOpened")
   assert.equal(Logic.eventSoundId("unknownEvent", sounds), "")
   // "none" survives as an assignment.
   assert.equal(Logic.eventSoundId("volumeUp", { volumeUp: "none" }), "none")

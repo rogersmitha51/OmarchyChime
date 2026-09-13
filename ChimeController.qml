@@ -39,27 +39,16 @@
 // cues, the notifications switch and observer readiness loss cut only
 // notification cues, while master mute and safety loss stop everything.
 //
-// Rapid automatic non-notification events preempt one another: when an
-// otherwise-eligible automatic event arrives while a different automatic
-// non-notification cue owns the voice, the old cue is terminated and the
-// new event is retained as a single latest-only pending replacement, which
-// starts only after the old process has actually exited — never overlapping
-// it. A further automatic event replaces the pending intent; a preview or a
-// notification cue is never preempted (and never preempts).
+// Rapid automatic non-notification events preempt one another through a
+// single latest-only pending replacement. Repeated volume events in the same
+// direction are coalesced so a tonal cue can finish cleanly; reversing
+// direction preempts it so the audible cue immediately reflects the user's
+// latest input. A preview or notification cue is never preempted (and never
+// preempts), and replacements start only after the old child exits.
 // Playback is a single voice with a synchronous reservation: `playing`
 // becomes true the moment a play is accepted, before the child process is
-// even requested, so same-tick bursts see one accepted play and then
-// "busy". The reservation is only released when the child has actually
-// exited (or failed to start); a cancellation that lands before the child
-// was ever spawned releases it immediately so it can never strand.
-//
-// Rapid automatic non-notification events preempt one another: when an
-// otherwise-eligible automatic event arrives while a different automatic
-// non-notification cue owns the voice, the old cue is terminated and the
-// new event is retained as a single latest-only pending replacement, which
-// starts only after the old process has actually exited — never overlapping
-// it. A further automatic event replaces the pending intent; a preview or a
-// notification cue is never preempted (and never preempts).
+// even requested. The reservation is released only when the child exits (or
+// fails to start), so replacements never overlap.
 
 import QtQuick
 import Quickshell
@@ -91,6 +80,10 @@ Item {
     readonly property var soundCatalog: ChimeLogic.SOUND_CATALOG
     readonly property var soundIds: ChimeLogic.SOUND_IDS
     readonly property string soundNoneId: ChimeLogic.SOUND_NONE
+    readonly property var themePackIds: ChimeLogic.THEME_PACK_IDS
+    readonly property var themePackLabels: ChimeLogic.THEME_PACK_LABELS
+    readonly property string themePackCustomId: ChimeLogic.THEME_PACK_CUSTOM
+    readonly property string themePack: ChimeLogic.themePackId(root._settings.sounds)
     readonly property bool playing: root._reserved || player.running
 
     // The catalog id assigned to an event (with event-default fallback for
@@ -106,6 +99,18 @@ Item {
     // camelCase.
     function eventLabel(eventName) {
         return ChimeLogic.eventLabel(eventName);
+    }
+
+    // A complete pack assignment is applied in one settings write. Any later
+    // per-event edit makes the derived themePack property read "custom".
+    function setThemePack(packId) {
+        if (!ChimeLogic.isValidThemePack(packId))
+            return "unknown theme pack: " + packId;
+        root._replaceSettings({
+            sounds: ChimeLogic.themePackSounds(packId)
+        });
+        root._persist();
+        return "theme pack -> " + packId;
     }
 
     // Resolves a relative asset (the plugin-local cue) through Qt.resolvedUrl
@@ -433,16 +438,13 @@ Item {
 
     // Gate-check an automatic non-notification event and, when eligible,
     // start it. Returns the event name when played, or the first blocking
-    // reason. Events that are valid and otherwise eligible are never reported
-    // "busy": while another automatic non-notification cue owns the voice
-    // they preempt it (latest-only pending replacement); a preview or a
-    // notification cue is never preempted, so those still report "busy". The
-    // cooldown is deliberately not part of this gate state: automatic
-    // non-notification events ignore the post-exit cooldown entirely — the
-    // source state machines deduplicate non-transitions and the controller
-    // preempts a running voice, so a rapid repeated event (e.g. a second
-    // workspaceSwitched after the child exited) must stay eligible.
-    // Notification playback and previews keep the cooldown as their own gate.
+    // reason. Events that are valid and otherwise eligible normally preempt
+    // another automatic cue (latest-only pending replacement). Repeated volume
+    // events in the same direction are coalesced to let the tonal cue finish;
+    // a direction reversal preempts it so feedback follows the latest input.
+    // A preview or notification cue is never preempted and reports "busy".
+    // Automatic non-notification events ignore the post-exit cooldown because
+    // their source state machines already deduplicate non-transitions.
     function _startAutomatic(eventName) {
         var state = {
             settingsReady: root._settingsReady,
@@ -487,6 +489,14 @@ Item {
         if (!asset)
             return "no asset for event: " + eventName;
         if (root.playing) {
+            // Volume keys commonly emit faster than a short cue completes.
+            // Coalesce repeats in the same direction so pw-play reaches the
+            // file's zero-valued tail. A direction reversal remains
+            // preemptible: keeping the old-direction cue is stale feedback.
+            if (!root._isPreview
+                    && root._currentEvent === eventName
+                    && ChimeLogic.isVolumeEvent(eventName))
+                return eventName;
             // A preview or a notification cue owns the voice: never preempted.
             // A different automatic non-notification cue is preemptible.
             if (root._isPreview || ChimeLogic.isNotificationEvent(root._currentEvent))
@@ -516,18 +526,10 @@ Item {
 
     // First blocking reason for a valid non-notification automatic event,
     // from the shared gate policy. The kind-specific readiness gate is
-    // selected here: system events (volume/power) use systemReady, everything
-    // else uses desktopReady. The cooldown and the voice-busy gate are
-    // deliberately excluded: the cooldown never governs automatic
-    // non-notification events (the source state machines deduplicate
-    // non-transitions, the controller preempts a running voice, and
-    // notification playback and previews keep the cooldown as their own
-    // gate), and ownership of the single voice is decided by this controller,
-    // not by the shared policy — a free voice starts the event, a preview or
-    // notification cue is never preempted ("busy"), and a different automatic
-    // non-notification cue is preempted (latest-only replacement) once the
-    // new event passes its own gates. The immediate-start path inside
-    // `_startAutomatic` still enforces the held-claim gate.
+    // selected here: system events use systemReady, everything else uses
+    // desktopReady. Cooldown and voice ownership are deliberately excluded:
+    // playEvent owns preemption/coalescing, while this helper only evaluates
+    // the external gates. Notification playback and previews keep cooldown.
     function _gatesBlocked(eventName) {
         return ChimeLogic.automaticBlockedReason({
             settingsReady: root._settingsReady,
@@ -731,6 +733,7 @@ Item {
             desktopEnabled: root.desktopEnabled,
             notificationsEnabled: root.notificationsEnabled,
             eventSounds: root.eventSounds,
+            themePack: root.themePack,
             notificationReady: root.notificationReady,
             safetyReady: root.safetyReady,
             desktopReady: root.desktopReady,

@@ -1,12 +1,12 @@
-// Issue #7 runtime probe: loads the REAL ChimeController against an
-// isolated XDG config seeded with a complete v3 file. Verifies:
+// Theme-pack and event-sound runtime probe: loads the REAL ChimeController
+// against an isolated XDG config seeded with a complete v3 file. Verifies:
 //   1. the v3 -> v4 migration (default sounds seeded, file rewritten v4)
-//   2. setEventSound assignment + persistence
-//   3. API validation (path traversal, unknown ids rejected)
+//   2. per-event assignment + persistence and API validation
+//   3. whole-pack selection + persistence, derived pack state, and playback path
 //   4. preview preemption: a preview arriving while a preview owns the
-//      voice cuts it and plays latest-only (issue #7 panel behavior)
-//   5. "none" silence: an event assigned none never claims the voice
-//   6. preview-vs-automatic bounds (busy) and cooldown policy
+//   5. same-direction volume repeats coalesce; reversals preempt immediately
+//   6. "none" silence: an event assigned none never claims the voice
+//   7. preview-vs-automatic bounds (busy) and cooldown policy
 // Never touches the real desktop state. Audio may play during the preview
 // steps (the seed volume is 0, so it is inaudible).
 //
@@ -144,16 +144,31 @@ ShellRoot {
             check(controller.setEventSound("workspaceSwitched", "../etc/passwd") === "unknown sound: ../etc/passwd", "path traversal rejected");
             check(controller.setEventSound("nope", "bell") === "unknown event: nope", "unknown event rejected");
             check(controller.eventSounds.workspaceSwitched === "bell", "assignment unchanged after rejects");
+            check(controller.themePack === "custom", "per-event edit derives custom pack");
+            var packResult = controller.setThemePack("zen-wood");
+            check(packResult === "theme pack -> zen-wood", "setThemePack result, got: " + packResult);
+            check(controller.themePack === "zen-wood", "Zen Wood pack visible");
+            check(controller._eventAssetPath("workspaceSwitched").indexOf("/assets/packs/zen-wood/workspace-switched.wav") !== -1, "Zen Wood playback path resolved");
+            check(controller.setThemePack("missing") === "unknown theme pack: missing", "unknown theme pack rejected");
+            probe.readDisk();
             probe.step = 3;
         } else if (probe.step === 3) {
-            // Catalog exposure for the panel.
-            check(controller.soundIds.length === 20, "catalog size 20, got: " + controller.soundIds.length);
+            // Wait for the atomic pack assignment to land on disk.
+            var d3 = probe.diskParsed();
+            if (d3 === null || !d3.sounds || d3.sounds.workspaceSwitched !== "zen-wood:workspaceSwitched") {
+                probe.readDisk();
+                return;
+            }
+            check(d3.sounds.notificationReceived === "zen-wood:notificationReceived", "Zen Wood notification persisted");
+            // Catalog and pack exposure for the panel.
+            check(controller.soundIds.length === 68, "catalog size 68, got: " + controller.soundIds.length);
             check(controller.soundNoneId === "none", "none exposed as the silence id");
             check(controller.soundCatalog.none.path === "", "none catalog entry has empty path");
-            check(controller.soundCatalog.bell.path === "/usr/share/sounds/freedesktop/stereo/bell.oga", "catalog bell entry");
-            check(controller._eventAssetPath("notificationReceived").indexOf("/assets/agent-needs-input.wav") !== -1, "local asset resolves to plugin dir, got: " + controller._eventAssetPath("notificationReceived"));
+            check(controller.soundCatalog["zen-wood:windowOpened"].path === "assets/packs/zen-wood/window-opened.wav", "Zen Wood catalog entry");
+            check(controller.themePackIds.length === 7, "seven theme packs exposed");
             var st = controller.status();
-            check(st.eventSounds && st.eventSounds.workspaceSwitched === "bell", "status carries eventSounds");
+            check(st.themePack === "zen-wood", "status carries selected pack");
+            check(st.eventSounds && st.eventSounds.workspaceSwitched === "zen-wood:workspaceSwitched", "status carries pack eventSounds");
             probe.step = 4;
         } else if (probe.step === 4) {
             // ---- preview preemption -------------------------------------
@@ -204,13 +219,33 @@ ShellRoot {
             check(p5 === "busy", "preview cannot preempt automatic, got: " + p5);
             probe.step = 7;
         } else if (probe.step === 7) {
-            // Hold until the automatic cue exits and its release cooldown
-            // clears, so the none-step starts from a quiet voice.
+            // Once the previous automatic cue and cooldown finish, start a
+            // tonal volume cue. A same-direction repeat coalesces, but the
+            // opposite direction must preempt the stale cue (issue #11).
             if (controller.playing || controller._cooldownActive)
                 return;
+            controller.setThemePack("retro-hacker");
+            controller.systemReady = true;
+            var v1 = controller.playEvent("volumeUp");
+            var v1Repeat = controller.playEvent("volumeUp");
+            check(v1 === "volumeUp" && v1Repeat === "volumeUp", "same-direction volume events accepted");
+            check(controller._currentEvent === "volumeUp", "same-direction repeat kept the running cue");
+            check(controller._pendingReplacement === "", "same-direction repeat coalesced");
+            var v2 = controller.playEvent("volumeDown");
+            check(v2 === "volumeDown", "opposite volume event accepted");
+            check(controller._pendingReplacement === "volumeDown", "direction reversal retained as replacement");
+            check(controller._deliberateStop === true, "direction reversal requested preemption");
             probe.step = 8;
         } else if (probe.step === 8) {
-            // ---- none (silence) -----------------------------------------
+            if (controller._pendingReplacement !== "")
+                return;
+            check(controller.playing === true, "reversed volume cue started");
+            check(controller._currentEvent === "volumeDown", "reversal plays latest direction, got: " + controller._currentEvent);
+            check(controller._pendingReplacement === "", "reversal replacement consumed");
+            probe.step = 9;
+        } else if (probe.step === 9) {
+            if (controller.playing || controller._cooldownActive)
+                return;
             // Assign "none" and confirm every path reports silence without
             // ever touching the voice. All gates on so each path reaches its
             // silent check: master + desktop (step 6), systemReady for the
@@ -239,8 +274,8 @@ ShellRoot {
             // Restoring a real sound makes the event audible again.
             controller.setEventSound("volumeUp", "audio-volume-change");
             check(controller._eventAssetPath("volumeUp") !== "", "restored assignment resolves to a path");
-            probe.step = 9;
-        } else if (probe.step === 9) {
+            probe.step = 10;
+        } else if (probe.step === 10) {
             controller.safetyReady = false;
             controller.setDesktopEnabled(false);
             controller.setNotificationsEnabled(false);

@@ -1,0 +1,112 @@
+{
+  "name": "Retro Hacker",
+  "description": "calm, restrained, non-jarring terminal ambience",
+  "source": {
+    "name": "Kenney Interface Sounds",
+    "url": "https://kenney.nl/assets/interface-sounds",
+    "files": {
+      "window-opened.wav": "Audio/pluck_001.ogg",
+      "window-closed.wav": "Audio/pluck_002.ogg",
+      "workspace-switched.wav": "Audio/select_003.ogg",
+      "notification-received.wav": "Audio/confirmation_002.ogg",
+      "volume-up.wav": "Audio/tick_001.ogg",
+      "volume-down.wav": "Audio/tick_002.ogg",
+      "power-connected.wav": "Audio/toggle_001.ogg",
+      "power-disconnected.wav": "Audio/toggle_002.ogg"
+    }
+  },
+  "license": {
+    "name": "Creative Commons CC0 1.0",
+    "url": "https://creativecommons.org/publicdomain/zero/1.0/"
+  },
+  "audio_format": {
+    "container": "WAV",
+    "codec": "signed 16-bit PCM",
+    "channels": 1,
+    "sample_rate_hz": 44100
+  },
+  "mastering": {
+    "active_region_definition": "First through last sample at or above -50 dBFS.",
+    "nominal_active_rms_targets_dbfs": {
+      "notification_and_power": -18.0,
+      "volume": -18.5,
+      "window_and_workspace": -21.5
+    },
+    "target_adjustment": "Up to 1.25 dB where needed to keep sample peaks inside the event-role range.",
+    "ending": "10 ms fade followed by digital silence; overlong cues trimmed to the guideline maximum."
+  },
+  "cues": {
+    "notification-received": {
+      "file": "notification-received.wav",
+      "duration_seconds": 0.589002,
+      "sample_peak_dbfs": -6.36,
+      "true_peak_dbtp": -6.36,
+      "whole_file_rms_dbfs": -18.72,
+      "active_region_rms_dbfs": -18.0,
+      "crest_factor_db": 11.64
+    },
+    "power-connected": {
+      "file": "power-connected.wav",
+      "duration_seconds": 0.186417,
+      "sample_peak_dbfs": -5.41,
+      "true_peak_dbtp": -5.39,
+      "whole_file_rms_dbfs": -20.79,
+      "active_region_rms_dbfs": -18.0,
+      "crest_factor_db": 12.59
+    },
+    "power-disconnected": {
+      "file": "power-disconnected.wav",
+      "duration_seconds": 0.186417,
+      "sample_peak_dbfs": -7.21,
+      "true_peak_dbtp": -7.19,
+      "whole_file_rms_dbfs": -20.98,
+      "active_region_rms_dbfs": -18.0,
+      "crest_factor_db": 10.79
+    },
+    "volume-down": {
+      "file": "volume-down.wav",
+      "duration_seconds": 0.070317,
+      "sample_peak_dbfs": -6.55,
+      "true_peak_dbtp": -6.55,
+      "whole_file_rms_dbfs": -23.9,
+      "active_region_rms_dbfs": -18.5,
+      "crest_factor_db": 11.95
+    },
+    "volume-up": {
+      "file": "volume-up.wav",
+      "duration_seconds": 0.094989,
+      "sample_peak_dbfs": -5.28,
+      "true_peak_dbtp": -5.26,
+      "whole_file_rms_dbfs": -26.12,
+      "active_region_rms_dbfs": -18.5,
+      "crest_factor_db": 13.22
+    },
+    "window-closed": {
+      "file": "window-closed.wav",
+      "duration_seconds": 0.211655,
+      "sample_peak_dbfs": -7.98,
+      "true_peak_dbtp": -7.95,
+      "whole_file_rms_dbfs": -23.86,
+      "active_region_rms_dbfs": -21.5,
+      "crest_factor_db": 13.52
+    },
+    "window-opened": {
+      "file": "window-opened.wav",
+      "duration_seconds": 0.149524,
+      "sample_peak_dbfs": -8.59,
+      "true_peak_dbtp": -8.56,
+      "whole_file_rms_dbfs": -24.15,
+      "active_region_rms_dbfs": -21.5,
+      "crest_factor_db": 12.91
+    },
+    "workspace-switched": {
+      "file": "workspace-switched.wav",
+      "duration_seconds": 0.35,
+      "sample_peak_dbfs": -7.54,
+      "true_peak_dbtp": -7.53,
+      "whole_file_rms_dbfs": -23.74,
+      "active_region_rms_dbfs": -21.5,
+      "crest_factor_db": 13.96
+    }
+  }
+}

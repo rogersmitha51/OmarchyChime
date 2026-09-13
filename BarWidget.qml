@@ -3,7 +3,7 @@
 // settings panel through the shell host (`shell toggle`), right click toggles
 // master mute through the live service's controller. No second controller,
 // store, player, or observer is created; the plugin's service + panel + keep
-// loaded kinds mean the shell keeps routing `shell toggle nick.chime` to the
+// loaded kinds mean the shell keeps routing `shell toggle omarchychime.sounds` to the
 // panel loader (shell.qml isBarWidgetPanelPlugin excludes panel-kind plugins).
 
 // The bar host injects `bar` (Bar root) and Style.bar tokens without static
@@ -18,11 +18,11 @@ import qs.Ui
 
 BarWidget {
     id: root
-    moduleName: "nick.chime"
+    moduleName: "omarchychime.sounds"
 
     // The live service singleton. The bar injects `shell` into widgets; the
     // media widget reaches its service the same way (bar?.shell?.firstPartyServiceFor).
-    readonly property var chime: root.bar && root.bar.shell ? root.bar.shell.firstPartyServiceFor("nick.chime") : null
+    readonly property var chime: root.bar && root.bar.shell ? root.bar.shell.firstPartyServiceFor("omarchychime.sounds") : null
     readonly property var ctl: chime && chime.controllerApi ? chime.controllerApi : null
 
     readonly property bool muted: ctl ? !ctl.enabled : false
@@ -34,7 +34,7 @@ BarWidget {
 
     function togglePanel() {
         if (root.bar)
-            root.bar.run("omarchy-shell shell toggle nick.chime '{}'");
+            root.bar.run("omarchy-shell shell toggle omarchychime.sounds '{}'");
     }
 
     // Nerd Font bell glyphs (verified in JetBrainsMono Nerd Font):

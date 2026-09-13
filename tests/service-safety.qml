@@ -340,7 +340,7 @@ ShellRoot {
 
     function step1() {
         var s = harness.status();
-        harness.check(s.plugin === "nick.chime", "plugin identity");
+        harness.check(s.plugin === "omarchychime.sounds", "plugin identity");
         harness.check(s.version === "0.3.0", "status version matches manifest");
         harness.check(s.safety.ready === true, "initial ready");
         harness.check(s.safety.dndPresent === true && s.safety.dndValid === true, "dnd present and valid");
