@@ -272,8 +272,13 @@ Item {
         minimumSize: Qt.size(420, 420)
 
         onVisibleChanged: {
-            if (!visible && !root.closingFromHost && root.shell && typeof root.shell.hide === "function")
+            if (visible) {
+                Qt.callLater(function () {
+                    keyCatcher.forceActiveFocus();
+                });
+            } else if (!root.closingFromHost && root.shell && typeof root.shell.hide === "function") {
                 root.shell.hide("omarchychime.sounds");
+            }
         }
 
         FocusScope {
