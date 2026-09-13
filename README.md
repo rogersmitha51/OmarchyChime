@@ -2,6 +2,8 @@
 
 Omarchy Chime adds short sounds to the Omarchy desktop.
 
+![Omarchy Chime settings and features](preview.png)
+
 It can play a sound when you:
 
 - open or close a window;
