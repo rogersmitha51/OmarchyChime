@@ -5,8 +5,8 @@
     "name": "Kenney Interface Sounds",
     "url": "https://kenney.nl/assets/interface-sounds",
     "files": {
-      "window-opened.wav": "Audio/pluck_001.ogg",
-      "window-closed.wav": "Audio/pluck_002.ogg",
+      "window-opened.wav": "Audio/pluck_002.ogg",
+      "window-closed.wav": "Audio/pluck_001.ogg",
       "workspace-switched.wav": "Audio/select_003.ogg",
       "notification-received.wav": "Audio/confirmation_002.ogg",
       "volume-up.wav": "Audio/tick_001.ogg",
@@ -83,21 +83,21 @@
     },
     "window-closed": {
       "file": "window-closed.wav",
-      "duration_seconds": 0.211655,
-      "sample_peak_dbfs": -7.98,
-      "true_peak_dbtp": -7.95,
-      "whole_file_rms_dbfs": -23.86,
-      "active_region_rms_dbfs": -21.5,
-      "crest_factor_db": 13.52
-    },
-    "window-opened": {
-      "file": "window-opened.wav",
       "duration_seconds": 0.149524,
       "sample_peak_dbfs": -8.59,
       "true_peak_dbtp": -8.56,
       "whole_file_rms_dbfs": -24.15,
       "active_region_rms_dbfs": -21.5,
       "crest_factor_db": 12.91
+    },
+    "window-opened": {
+      "file": "window-opened.wav",
+      "duration_seconds": 0.211655,
+      "sample_peak_dbfs": -7.98,
+      "true_peak_dbtp": -7.95,
+      "whole_file_rms_dbfs": -23.86,
+      "active_region_rms_dbfs": -21.5,
+      "crest_factor_db": 13.52
     },
     "workspace-switched": {
       "file": "workspace-switched.wav",

@@ -124,19 +124,19 @@
         "node --test tests/controller.test.mjs tests/desktop.test.mjs tests/system.test.mjs: 54 tests passed",
         "python -m unittest discover -s tests -p observer_test.py: 35 tests passed"
       ],
-      "panelGateNote": "The settings panel uses the validated standalone panel entry point and the plugin's one live controller. Earlier live lifecycle checks confirmed one-window summon behavior, hide, toggle, native close, and synchronized shell panel state. Final-ID lifecycle verification is recorded in the runtime list.",
+      "panelGateNote": "The final omarchychime.sounds installation passed one-window summon behavior, repeated summon deduplication, shell hide and toggle, automatic keyboard focus, Escape close, and visual inspection of the current-theme settings layout.",
       "runtime": [
         "Isolated service harness passed: exercised the service-state safety gating and playback rules of the real product service with injected DND/lock/idle objects.",
         "Live volume probe passed: a source-loaded SystemEvents.qml adapter attached to the live default PipeWire sink observed output volume 0.65→0.66 emit volumeUp and 0.66→0.65 emit volumeDown; restoring 0.66→0.65 emitted volumeDown and returned the sink to its original volume.",
         "Omarchy 4.0.3-mac.1 compatibility passed live after deploying the user-owned plugin and restarting the keepLoaded shell service: the capability-scoped shell facade denied the old private DND/lock/idle lookups as expected; persisted DND state plus public lock/idle IPC fallbacks all parsed valid and inactive, safety.ready became true, desktop/system/notification adapters became ready, and notificationReceived preview was accepted, started pw-play, exited, and left playbackError empty. Existing chime settings were preserved.",
-        "Earlier panel lifecycle checks passed summon, repeated summon, hide, toggle, native close, and current-theme layout inspection. Final-ID checks are recorded separately after release installation."
+        "Earlier panel lifecycle checks passed summon, repeated summon, hide, toggle, native close, and current-theme layout inspection.",
+        "Final-ID live verification passed on 2026-09-13: omarchychime.sounds installed and loaded as version 0.3.0 with safety ready; the bar widget registered visible in the right section; the settings panel rendered correctly, remained single-instance on repeated summon, accepted automatic keyboard focus, closed with Escape, and passed summon/hide/toggle round trips; status, help, pack listing, mute/unmute, volume change/restore, theme application, and notification preview completed; settings were restored byte-for-byte; disable/re-enable, shell restart, removal, and reinstall all completed with the service returning ready."
       ],
       "issue2Race": "Automatic desktop and power cues remain exempt from post-exit cooldown and use latest-only preemption. Rapid volumeUp/volumeDown events also ignore cooldown after completion, but coalesce while a volume cue is still playing so tonal WAVs reach their zero-valued tail instead of being terminated mid-wave. Notification cues and previews retain cooldown.",
       "notYetPerformed": [
         "Physical power plug/unplug transition (UPower on-battery change) and audible verification of the power cue: not yet performed.",
         "Physical multi-monitor audibility has deterministic coverage only.",
-        "Live rapid workspace-switch race after the issue #2 fix: not re-tested on the desktop; the fix is verified at source/policy level only.",
-        "Issue #6 panel interaction coverage: runtime lifecycle and the normal unlocked ready-state layout were verified, but keyboard (Esc/Tab/j/k/h/l), direct control interaction, preview sound, IPC-to-open-panel reflection, and disabled/warning/error visuals were not directly observed."
+        "Live rapid workspace-switch race after the issue #2 fix has source and policy verification only."
       ]
     },
     "historical": {
