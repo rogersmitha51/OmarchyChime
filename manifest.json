@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "omarchychime.sounds",
   "name": "Omarchy Chime",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": "Roger Smith A51",
   "license": "MIT",
   "description": "Desktop sounds for windows, workspaces, volume, power, and notifications, with selectable sound packs.",

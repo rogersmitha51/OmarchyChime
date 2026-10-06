@@ -265,6 +265,7 @@ Item {
 
     FloatingWindow {
         id: window
+        visible: false
         title: "Omarchy Chime — settings"
         color: root.background
         implicitWidth: 560

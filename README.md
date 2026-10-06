@@ -46,6 +46,9 @@ Click the Chime bell in the top bar, or run:
 omarchy-shell shell toggle omarchychime.sounds '{}'
 ```
 
+The settings window stays hidden when Omarchy starts; the Chime service and bar
+widget still load normally. Open the window only when you need its controls.
+
 The settings panel lets you:
 
 - turn all sounds on or off;

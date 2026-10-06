@@ -2,8 +2,8 @@
   "provenance": {
     "project": "Omarchy Chime",
     "pluginId": "omarchychime.sounds",
-    "version": "0.3.0",
-    "status": "0.3.0 release source",
+    "version": "0.3.1",
+    "status": "0.3.1 release source",
     "description": "Omarchy desktop sounds for window, workspace, volume, power, and notification events. Includes per-event sound selection, six bundled sound packs, mute, relative volume, previews, and conservative DND, lock, and idle safety gates.",
     "referenceImplementation": "Omarchy shell plugin conventions and gobijan.ui-sounds desktop-event filters; no notification implementation retained."
   },

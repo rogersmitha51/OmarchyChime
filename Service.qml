@@ -408,7 +408,7 @@ Item {
     function statusJson() {
         return JSON.stringify({
             plugin: "omarchychime.sounds",
-            version: "0.3.0",
+            version: "0.3.1",
             safety: {
                 ready: service.safetyReady,
                 reason: service.safetyReason,
